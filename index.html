@@ -3,207 +3,340 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meine Todo App</title>
+    <title>Todo App</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English&display=swap" rel="stylesheet">
+
     <style>
+        /* --- DESIGN WIE IN DER APP --- */
         body {
             background-color: #121212;
             color: white;
-            font-family: 'Georgia', serif; /* Ähnlich wie IM Fell English */
+            font-family: 'IM Fell English', serif;
+            margin: 0;
             display: flex;
             justify-content: center;
-            margin: 0;
+        }
+
+        .app-container {
+            width: 100%;
+            max-width: 600px; /* Tablet/Laptop Breite */
             padding: 20px;
         }
-        .container {
-            width: 100%;
-            max-width: 500px;
+
+        /* Versteckt die Scrollbar, aber lässt scrollen zu */
+        ::-webkit-scrollbar { display: none; }
+
+        /* --- TAGES-SEKTIONEN --- */
+        .day-section {
+            margin-bottom: 48px; /* Abstand wie in der App */
         }
-        h1 {
-            text-align: center;
-            color: #4285F4;
-            font-family: sans-serif;
-        }
-        .input-group {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 30px;
-        }
-        input[type="text"] {
-            flex-grow: 1;
-            background: #333;
-            border: 1px solid #555;
-            color: white;
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 16px;
-        }
-        button {
-            background: #4285F4;
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        button:hover { background: #3367d6; }
-        
-        .todo-item {
-            background: #1e1e1e;
-            padding: 15px;
-            margin-bottom: 8px;
-            border-radius: 8px;
+
+        .day-header {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            transition: all 0.2s;
-        }
-        .todo-text {
-            flex-grow: 1;
-            margin-left: 15px;
-            font-size: 18px;
-        }
-        .done {
-            text-decoration: line-through;
-            color: gray;
-            opacity: 0.6;
-        }
-        /* Custom Checkbox Look */
-        .checkbox {
-            width: 20px;
-            height: 20px;
-            border: 2px solid white;
-            border-radius: 4px;
             cursor: pointer;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #444;
+            user-select: none;
+        }
+
+        .weekday {
+            font-size: 28px;
+            font-weight: bold;
+            color: gray;
+            text-transform: uppercase;
+        }
+        .weekday.today { color: #4285F4; }
+
+        .date-small {
+            font-size: 14px;
+            color: gray;
+            margin-left: 12px;
+            font-family: 'IM Fell English', serif;
+        }
+
+        .toggle-icon {
+            margin-left: auto; /* Schiebt Icon nach rechts */
+            color: gray;
+            font-size: 24px;
+            transition: transform 0.2s;
+        }
+        .toggle-icon.closed { transform: rotate(-90deg); }
+
+        /* --- AUFGABEN LISTE --- */
+        .todo-list {
+            margin-top: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .hidden { display: none; }
+
+        .todo-row {
+            display: flex;
+            align-items: center;
+            padding: 4px;
+            transition: opacity 0.2s;
+        }
+        .todo-row.done { opacity: 0.5; }
+
+        /* Custom Checkbox */
+        .checkbox-wrapper {
+            padding: 4px;
+            cursor: pointer;
+        }
+        .checkbox {
+            width: 18px;
+            height: 18px;
+            border: 2px solid gray;
+            border-radius: 2px;
             display: flex;
             align-items: center;
             justify-content: center;
+            color: white;
+            font-size: 14px;
         }
         .checkbox.checked {
             background-color: #4285F4;
             border-color: #4285F4;
         }
-        .delete-btn {
-            color: #ff6b6b;
-            cursor: pointer;
-            padding: 5px;
-            margin-left: 10px;
-            font-family: sans-serif;
+        .checkbox.today-unchecked { border-color: white; }
+
+        /* Das Eingabefeld (sieht aus wie Text) */
+        .todo-input {
+            background: transparent;
+            border: none;
+            color: white;
+            font-family: 'IM Fell English', serif;
+            font-size: 18px; /* App Größe */
+            flex-grow: 1;
+            margin-left: 12px;
+            outline: none;
+            padding: 5px 0;
         }
+        .todo-input.done { text-decoration: line-through; color: gray !important; }
+
+        /* --- TAP TO ADD BEREICH --- */
+        .tap-to-add {
+            height: 40px;
+            display: flex;
+            align-items: center;
+            color: #444;
+            font-size: 14px;
+            cursor: pointer;
+            padding-left: 4px;
+            margin-top: 8px;
+        }
+        .tap-to-add:hover { color: #666; }
+
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h1>Meine Todos</h1>
-    
-    <div class="input-group">
-        <input type="text" id="todoInput" placeholder="Neue Aufgabe..." onkeypress="handleEnter(event)">
-        <button onclick="addTodo()">+</button>
-    </div>
-
-    <div id="todoList">
-        Lade Daten...
-    </div>
+<div class="app-container" id="app">
+    <div style="text-align:center; margin-top:50px; color:gray;">Lade App...</div>
 </div>
 
 <script type="module">
-    // --- FIREBASE IMPORTIEREN ---
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
     import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, updateDoc, doc, deleteDoc, where } 
       from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-    // --- DEINE KONFIGURATION (HIER MUSST DU GLEICH WAS EINFÜGEN) ---
+    // ==========================================
+    // WICHTIG: HIER DEINE CONFIG EINFÜGEN !!!
+    // ==========================================
     const firebaseConfig = {
-        // ... HIER GLEICH DEINE DATEN EINFÜGEN ...
-    };
 
-    // --- APP STARTEN ---
-    let app, db;
+  apiKey: "AIzaSyDULojwaebqfM9f1z7L4JFiUO0eqK9OpBQ",
+
+  authDomain: "todo-28d2e.firebaseapp.com",
+
+  projectId: "todo-28d2e",
+
+  storageBucket: "todo-28d2e.firebasestorage.app",
+
+  messagingSenderId: "640913241762",
+
+  appId: "1:640913241762:web:cdb26cd9a79d061cb609fb",
+
+  measurementId: "G-3CE2KBZ6KY"
+
+};
+
+    // App initialisieren
+    let db;
     try {
-        app = initializeApp(firebaseConfig);
+        const app = initializeApp(firebaseConfig);
         db = getFirestore(app);
     } catch (e) {
-        document.getElementById("todoList").innerHTML = "Fehler: Config fehlt!";
-        console.error(e);
+        document.getElementById("app").innerHTML = "<h1>Fehler: Config fehlt!</h1><p>Bitte bearbeite die index.html und füge deine Firebase Config ein.</p>";
     }
 
-    // --- DATEN LADEN (Nur von HEUTE und ZUKUNFT) ---
-    // Android nutzt Epoch Days. Wir berechnen den heutigen Tag.
-    const todayEpoch = Math.floor(Date.now() / 86400000);
+    // --- STATE ---
+    let allTodos = [];
+    // Speichert, welche Tage offen sind (Standard: Heute+Zukunft offen, Gestern zu)
+    let expandedStates = {}; 
 
-    const q = query(
-        collection(db, "todos"), 
-        where("dateEpochDay", ">=", todayEpoch), // Zeige nur Aufgaben ab heute
-        orderBy("dateEpochDay", "asc"),
-        orderBy("sortOrder", "asc")
-    );
+    // --- DATUM HELFER ---
+    const todayEpoch = Math.floor(Date.now() / 86400000);
+    const dayNames = ["SONNTAG", "MONTAG", "DIENSTAG", "MITTWOCH", "DONNERSTAG", "FREITAG", "SAMSTAG"];
+
+    function getEpochDay(date) {
+        return Math.floor(date.getTime() / 86400000);
+    }
+
+    function formatDate(epoch) {
+        const d = new Date(epoch * 86400000);
+        return d.getDate().toString().padStart(2, '0') + "." + (d.getMonth() + 1).toString().padStart(2, '0') + ".";
+    }
+
+    function getDayName(epoch) {
+        const d = new Date(epoch * 86400000);
+        return dayNames[d.getDay()];
+    }
+
+    // --- DATENBANK LISTENER ---
+    // Wir laden ALLES (auch Gestern), damit wir die Historie sehen
+    const q = query(collection(db, "todos"), orderBy("sortOrder", "asc"));
     
     onSnapshot(q, (snapshot) => {
-        const listDiv = document.getElementById("todoList");
-        listDiv.innerHTML = "";
-        
-        snapshot.forEach((docSnap) => {
-            const todo = docSnap.data();
-            renderTodo(listDiv, docSnap.id, todo);
+        allTodos = [];
+        snapshot.forEach(doc => {
+            allTodos.push({ id: doc.id, ...doc.data() });
         });
-        
-        if(snapshot.empty) listDiv.innerHTML = "<div style='text-align:center; color:gray'>Alles erledigt!</div>";
+        renderApp();
     });
 
-    // --- HILFSFUNKTIONEN ---
+    // --- RENDERING (Die UI bauen) ---
+    function renderApp() {
+        const container = document.getElementById("app");
+        container.innerHTML = "";
 
-    function renderTodo(container, id, todo) {
-        const div = document.createElement("div");
-        div.className = "todo-item";
-        
-        // Farbe berechnen (wie in der Android App)
-        let colorStyle = "";
-        if (!todo.isDone) {
-            if (todo.moveCount === 1) colorStyle = "color: #FFFFE6;";
-            else if (todo.moveCount === 2) colorStyle = "color: #FFEFE0;";
-            else if (todo.moveCount >= 3) colorStyle = "color: #FFEBEB;";
+        // Wir zeigen Gestern (-1) bis +6 Tage an (wie in der App)
+        for (let i = -1; i <= 6; i++) {
+            const currentDayEpoch = todayEpoch + i;
+            renderDaySection(container, currentDayEpoch);
         }
-
-        div.innerHTML = `
-            <div class="checkbox ${todo.isDone ? 'checked' : ''}" onclick="toggleTodo('${id}', ${!todo.isDone})">
-                ${todo.isDone ? '✓' : ''}
-            </div>
-            <span class="todo-text ${todo.isDone ? 'done' : ''}" style="${colorStyle}">
-                ${todo.text}
-            </span>
-            <span class="delete-btn" onclick="deleteTodo('${id}')">✕</span>
-        `;
-        container.appendChild(div);
     }
 
-    // Funktionen global verfügbar machen für HTML onclick
-    window.addTodo = async () => {
-        const input = document.getElementById("todoInput");
-        if (!input.value.trim()) return;
+    function renderDaySection(container, dateEpoch) {
+        const isToday = (dateEpoch === todayEpoch);
+        const isYesterday = (dateEpoch < todayEpoch);
+        
+        // Todos für diesen Tag filtern
+        const dayTodos = allTodos.filter(t => t.dateEpochDay === dateEpoch);
 
+        // Status initialisieren (falls noch nicht gesetzt)
+        if (expandedStates[dateEpoch] === undefined) {
+            expandedStates[dateEpoch] = !isYesterday; // Gestern zu, Rest auf
+        }
+        const isOpen = expandedStates[dateEpoch];
+
+        // 1. Header bauen
+        const section = document.createElement("div");
+        section.className = "day-section";
+
+        section.innerHTML = `
+            <div class="day-header" onclick="toggleSection(${dateEpoch})">
+                <span class="weekday ${isToday ? 'today' : ''}">${getDayName(dateEpoch)}</span>
+                <span class="date-small">${formatDate(dateEpoch)}</span>
+                <span class="toggle-icon ${isOpen ? '' : 'closed'}">▼</span>
+            </div>
+            <div class="todo-list ${isOpen ? '' : 'hidden'}" id="list-${dateEpoch}">
+                </div>
+        `;
+        
+        // 2. Todos einfügen
+        const listContainer = section.querySelector(`#list-${dateEpoch}`);
+        
+        dayTodos.forEach((todo, index) => {
+            const row = document.createElement("div");
+            row.className = `todo-row ${todo.isDone ? 'done' : ''}`;
+
+            // Farben Logik (Pastell)
+            let textColor = "white";
+            if (todo.isDone || isYesterday) textColor = "gray";
+            else if (todo.moveCount === 1) textColor = "#FFFFE6"; // Gelb
+            else if (todo.moveCount === 2) textColor = "#FFEFE0"; // Orange
+            else if (todo.moveCount >= 3) textColor = "#FFEBEB"; // Rot
+
+            row.innerHTML = `
+                <div class="checkbox-wrapper" onclick="toggleTodo('${todo.id}', ${!todo.isDone})">
+                    <div class="checkbox ${todo.isDone ? 'checked' : ''} ${isToday && !todo.isDone ? 'today-unchecked' : ''}">
+                        ${todo.isDone ? '✓' : ''}
+                    </div>
+                </div>
+                <input type="text" class="todo-input ${todo.isDone ? 'done' : ''}" 
+                    value="${todo.text}" 
+                    style="color: ${textColor}"
+                    oninput="handleInput(this, '${todo.id}')"
+                    onkeydown="handleKey(event, '${todo.id}', ${dateEpoch})"
+                >
+            `;
+            listContainer.appendChild(row);
+        });
+
+        // 3. "Tap to add" Button (Nur wenn offen)
+        if (isOpen) {
+            const addBtn = document.createElement("div");
+            addBtn.className = "tap-to-add";
+            addBtn.innerText = dayTodos.length === 0 ? "No tasks (tap to add)" : "";
+            // Klick auf die ganze Fläche erstellt Todo
+            addBtn.onclick = () => addTodo(dateEpoch);
+            // Auch wenn leer, soll der Bereich klickbar sein
+            addBtn.style.height = "40px";
+            addBtn.style.width = "100%";
+            
+            listContainer.appendChild(addBtn);
+        }
+
+        container.appendChild(section);
+    }
+
+    // --- LOGIK FUNKTIONEN ---
+
+    // Global verfügbar machen
+    window.toggleSection = (dateEpoch) => {
+        expandedStates[dateEpoch] = !expandedStates[dateEpoch];
+        renderApp(); // UI neu zeichnen
+    };
+
+    window.toggleTodo = async (id, newState) => {
+        await updateDoc(doc(db, "todos", id), { isDone: newState });
+    };
+
+    window.addTodo = async (dateEpoch) => {
         await addDoc(collection(db, "todos"), {
-            text: input.value,
+            text: "",
             isDone: false,
-            dateEpochDay: todayEpoch, // Immer für "Heute" anlegen
-            sortOrder: Date.now(), // Simpler Sort
+            dateEpochDay: dateEpoch,
+            sortOrder: Date.now(),
             moveCount: 0
         });
-        input.value = "";
+        // Fokus Logik ist im Web schwieriger, wir verlassen uns auf das Re-Render
     };
 
-    window.toggleTodo = async (id, newStatus) => {
-        await updateDoc(doc(db, "todos", id), { isDone: newStatus });
+    // Debouncing für Text-Update (Damit wir die DB nicht spammen)
+    let timeout = null;
+    window.handleInput = (input, id) => {
+        clearTimeout(timeout);
+        timeout = setTimeout(async () => {
+            await updateDoc(doc(db, "todos", id), { text: input.value });
+        }, 500); // 500ms warten nach Tippen
     };
 
-    window.deleteTodo = async (id) => {
-        if(confirm("Löschen?")) {
+    window.handleKey = async (e, id, dateEpoch) => {
+        // Bei Enter -> Neue Zeile darunter
+        if (e.key === "Enter") {
+            e.preventDefault();
+            await addTodo(dateEpoch);
+        }
+        // Bei Backspace & leer -> Löschen
+        if (e.key === "Backspace" && e.target.value === "") {
+            e.preventDefault();
             await deleteDoc(doc(db, "todos", id));
         }
-    };
-
-    window.handleEnter = (e) => {
-        if (e.key === "Enter") window.addTodo();
     };
 
 </script>
