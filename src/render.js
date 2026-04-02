@@ -129,10 +129,14 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         input.addEventListener('keydown', async (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
+                pendingRender = false;
+                input.blur();
                 await addTodo(uid, dateEpoch);
             }
             if (e.key === 'Backspace' && input.value === '') {
                 e.preventDefault();
+                pendingRender = false;
+                input.blur();
                 await deleteTodo(uid, todo.id);
             }
         });
