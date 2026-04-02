@@ -9,15 +9,15 @@ initAuth(
         document.getElementById('auth-screen').classList.add('hidden');
         document.getElementById('app').classList.remove('hidden');
 
+        document.getElementById('signout-btn').addEventListener('click', signOutUser);
+
         // Move all unchecked past todos to today (runs once on load/refresh)
-        await moveTodos(user.uid);
+        try { await moveTodos(user.uid); } catch (e) { console.error('moveTodos:', e); }
 
         // Subscribe to live Firestore updates
         unsubscribe = subscribeTodos(user.uid, (todos) => {
             scheduleRender(todos);
         });
-
-        document.getElementById('signout-btn').addEventListener('click', signOutUser);
     },
     () => {
         if (unsubscribe) {
