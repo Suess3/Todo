@@ -16,16 +16,13 @@ function todosRef(uid) {
 // Uses a batch update (never creates new documents) to prevent duplication.
 export async function moveTodos(uid) {
     const today = getTodayEpoch();
-    const q = query(
-        todosRef(uid),
-        where('dateEpochDay', '<', today),
-        where('isDone', '==', false)
-    );
+    const q = query(todosRef(uid), where('isDone', '==', false));
     const snapshot = await getDocs(q);
-    if (snapshot.empty) return;
+    const toMove = snapshot.docs.filter(d => d.data().dateEpochDay < today);
+    if (toMove.length === 0) return;
 
     const batch = writeBatch(db);
-    snapshot.forEach(docSnap => {
+    toMove.forEach(docSnap => {
         batch.update(docSnap.ref, {
             dateEpochDay: today,
             moveCount: (docSnap.data().moveCount || 0) + 1
