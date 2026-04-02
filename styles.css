@@ -10,7 +10,7 @@ body {
 
 ::-webkit-scrollbar { display: none; }
 
-.hidden { display: none; }
+.hidden { display: none !important; }
 
 /* --- AUTH --- */
 #auth-screen {
