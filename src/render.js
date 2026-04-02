@@ -9,10 +9,11 @@ let currentTodos = [];
 let pendingRender = false;
 
 // Called from app.js on every Firestore update.
-// Defers the render only if a typing debounce is active (user is mid-keystroke).
+// Defers the render if a todo-input is focused (user is actively typing).
 export function scheduleRender(todos) {
     currentTodos = todos;
-    if (debounceMap.size > 0) {
+    const active = document.activeElement;
+    if (active && active.classList.contains('todo-input')) {
         pendingRender = true;
         return;
     }
@@ -135,18 +136,15 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         input.addEventListener('keydown', async (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                // Clear any pending debounce so scheduleRender fires immediately
-                const existing = debounceMap.get(todo.id);
-                if (existing) { clearTimeout(existing); debounceMap.delete(todo.id); }
                 pendingRender = false;
                 await addTodo(uid, dateEpoch);
+                renderApp(currentTodos);
             }
             if (e.key === 'Backspace' && input.value === '') {
                 e.preventDefault();
-                const existing = debounceMap.get(todo.id);
-                if (existing) { clearTimeout(existing); debounceMap.delete(todo.id); }
                 pendingRender = false;
                 await deleteTodo(uid, todo.id);
+                renderApp(currentTodos);
             }
         });
 
