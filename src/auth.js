@@ -6,8 +6,11 @@ import {
     onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
+let suppressAuthChange = false;
+
 export function initAuth(onSignIn, onSignOut) {
     onAuthStateChanged(auth, user => {
+        if (suppressAuthChange) return;
         if (user) onSignIn(user);
         else onSignOut();
     });
@@ -65,9 +68,23 @@ export function renderAuthScreen() {
             if (mode === 'signin') {
                 await signInWithEmailAndPassword(auth, email, password);
             } else {
+                suppressAuthChange = true;
                 await createUserWithEmailAndPassword(auth, email, password);
+                await signOut(auth);
+                suppressAuthChange = false;
+                // Switch to sign-in tab and show success
+                mode = 'signin';
+                document.getElementById('tab-signup').classList.remove('active');
+                document.getElementById('tab-signin').classList.add('active');
+                document.getElementById('auth-submit').textContent = 'Sign In';
+                document.getElementById('auth-email').value = email;
+                document.getElementById('auth-password').value = '';
+                errorEl.style.color = '#6fcf6f';
+                errorEl.textContent = 'Account created! Please sign in.';
+                errorEl.classList.remove('hidden');
             }
         } catch (err) {
+            errorEl.style.color = '#ff6b6b';
             errorEl.textContent = err.message;
             errorEl.classList.remove('hidden');
         }
