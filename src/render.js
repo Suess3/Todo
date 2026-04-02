@@ -9,11 +9,10 @@ let currentTodos = [];
 let pendingRender = false;
 
 // Called from app.js on every Firestore update.
-// Defers the render if the user is currently typing in an input.
+// Defers the render only if a typing debounce is active (user is mid-keystroke).
 export function scheduleRender(todos) {
     currentTodos = todos;
-    const active = document.activeElement;
-    if (active && active.classList.contains('todo-input')) {
+    if (debounceMap.size > 0) {
         pendingRender = true;
         return;
     }
@@ -120,6 +119,13 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         });
 
         input.addEventListener('blur', () => {
+            // Flush any pending debounce immediately on blur
+            const existing = debounceMap.get(todo.id);
+            if (existing) {
+                clearTimeout(existing);
+                debounceMap.delete(todo.id);
+                updateTodoText(uid, todo.id, input.value);
+            }
             if (pendingRender) {
                 pendingRender = false;
                 renderApp(currentTodos);
@@ -129,14 +135,17 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         input.addEventListener('keydown', async (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
+                // Clear any pending debounce so scheduleRender fires immediately
+                const existing = debounceMap.get(todo.id);
+                if (existing) { clearTimeout(existing); debounceMap.delete(todo.id); }
                 pendingRender = false;
-                input.blur();
                 await addTodo(uid, dateEpoch);
             }
             if (e.key === 'Backspace' && input.value === '') {
                 e.preventDefault();
+                const existing = debounceMap.get(todo.id);
+                if (existing) { clearTimeout(existing); debounceMap.delete(todo.id); }
                 pendingRender = false;
-                input.blur();
                 await deleteTodo(uid, todo.id);
             }
         });
