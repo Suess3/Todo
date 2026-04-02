@@ -3,28 +3,41 @@ import { moveTodos, subscribeTodos } from './todoService.js';
 import { scheduleRender } from './render.js';
 
 let unsubscribe = null;
+let currentUid = null;
+
+function showApp() {
+    document.getElementById('auth-screen').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+}
+
+function showAuth() {
+    document.getElementById('app').classList.add('hidden');
+    renderAuthScreen();
+}
 
 initAuth(
     async (user) => {
-        document.getElementById('auth-screen').classList.add('hidden');
-        document.getElementById('app').classList.remove('hidden');
+        // Ignore if already set up for this user
+        if (currentUid === user.uid) return;
+        currentUid = user.uid;
 
-        document.getElementById('signout-btn').addEventListener('click', signOutUser);
+        showApp();
 
-        // Move all unchecked past todos to today (runs once on load/refresh)
+        document.getElementById('signout-btn').onclick = signOutUser;
+
         try { await moveTodos(user.uid); } catch (e) { console.error('moveTodos:', e); }
 
-        // Subscribe to live Firestore updates
+        if (unsubscribe) unsubscribe();
         unsubscribe = subscribeTodos(user.uid, (todos) => {
             scheduleRender(todos);
         });
     },
     () => {
+        currentUid = null;
         if (unsubscribe) {
             unsubscribe();
             unsubscribe = null;
         }
-        document.getElementById('app').classList.add('hidden');
-        renderAuthScreen();
+        showAuth();
     }
 );
