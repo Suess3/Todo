@@ -146,12 +146,17 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         input.addEventListener('keydown', async (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
+                const cursor = input.selectionStart;
+                const before = input.value.slice(0, cursor);
+                const after = input.value.slice(cursor);
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
-                const newDoc = await addTodo(uid, dateEpoch, '');
+                currentTodos[idx] = { ...currentTodos[idx], text: before };
+                dirtyIds.add(todo.id);
+                const newDoc = await addTodo(uid, dateEpoch, after);
                 focusTarget = { id: newDoc.id, cursor: 0 };
                 currentTodos = [
                     ...currentTodos.slice(0, idx + 1),
-                    { id: newDoc.id, text: '', isDone: false, dateEpochDay: dateEpoch, sortOrder: Date.now(), moveCount: 0 },
+                    { id: newDoc.id, text: after, isDone: false, dateEpochDay: dateEpoch, sortOrder: Date.now(), moveCount: 0 },
                     ...currentTodos.slice(idx + 1)
                 ];
                 renderApp(currentTodos);
@@ -168,6 +173,22 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 dirtyIds.delete(todo.id);
                 renderApp(currentTodos);
                 deleteTodo(uid, todo.id);
+            }
+
+            if (e.key === 'ArrowUp' && input.selectionStart === 0) {
+                e.preventDefault();
+                const idx = currentTodos.findIndex(t => t.id === todo.id);
+                const prev = currentTodos[idx - 1];
+                if (prev) focusTarget = { id: prev.id, cursor: prev.text.length };
+                renderApp(currentTodos);
+            }
+
+            if (e.key === 'ArrowDown' && input.selectionStart === input.value.length) {
+                e.preventDefault();
+                const idx = currentTodos.findIndex(t => t.id === todo.id);
+                const next = currentTodos[idx + 1];
+                if (next) focusTarget = { id: next.id, cursor: 0 };
+                renderApp(currentTodos);
             }
         });
 
