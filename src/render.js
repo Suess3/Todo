@@ -21,10 +21,11 @@ export function scheduleRender(todos) {
     renderApp(todos);
 }
 
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
 function formatDate(epoch) {
     const d = new Date(epoch * 86400000);
-    return d.getUTCDate().toString().padStart(2, '0') + '.' +
-           (d.getUTCMonth() + 1).toString().padStart(2, '0') + '.';
+    return d.getUTCDate().toString().padStart(2, '0') + '. ' + MONTH_NAMES[d.getUTCMonth()];
 }
 
 function getDayName(epoch) {
