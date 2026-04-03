@@ -154,12 +154,6 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 dirtyIds.add(todo.id);
                 const newDoc = await addTodo(uid, dateEpoch, after);
                 focusTarget = { id: newDoc.id, cursor: 0 };
-                currentTodos = [
-                    ...currentTodos.slice(0, idx + 1),
-                    { id: newDoc.id, text: after, isDone: false, dateEpochDay: dateEpoch, sortOrder: Date.now(), moveCount: 0 },
-                    ...currentTodos.slice(idx + 1)
-                ];
-                renderApp(currentTodos);
             }
 
             if (e.key === 'Backspace' && input.value === '') {
