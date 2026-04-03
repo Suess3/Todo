@@ -7,7 +7,7 @@ const expandedStates = {};
 const debounceMap = new Map();
 
 let currentTodos = [];
-let focusId = null; // ID of todo to focus after next render
+let focusTarget = null; // { id, cursor } to focus after next render
 
 export function scheduleRender(todos) {
     currentTodos = todos;
@@ -44,10 +44,10 @@ export function renderApp(todos) {
     }
 
     // Restore focus after render
-    if (focusId) {
-        const el = container.querySelector(`[data-id="${focusId}"]`);
-        if (el) { el.focus(); el.setSelectionRange(0, 0); }
-        focusId = null;
+    if (focusTarget) {
+        const el = container.querySelector(`[data-id="${focusTarget.id}"]`);
+        if (el) { el.focus(); el.setSelectionRange(focusTarget.cursor, focusTarget.cursor); }
+        focusTarget = null;
     } else if (savedFocus) {
         const el = container.querySelector(`[data-id="${savedFocus.id}"]`);
         if (el) { el.focus(); el.setSelectionRange(savedFocus.start, savedFocus.end); }
@@ -147,11 +147,27 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 await updateTodoText(uid, todo.id, before);
 
                 const newDoc = await addTodo(uid, dateEpoch, after);
-                focusId = newDoc.id;
+                focusTarget = { id: newDoc.id, cursor: 0 };
             }
-            if (e.key === 'Backspace' && input.value === '') {
+            if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
                 e.preventDefault();
-                await deleteTodo(uid, todo.id);
+                const idx = currentTodos.findIndex(t => t.id === todo.id);
+                const prev = currentTodos[idx - 1];
+                if (!prev || prev.dateEpochDay !== dateEpoch) return;
+
+                if (input.value === '') {
+                    // Empty line: delete and move cursor to end of previous
+                    focusTarget = { id: prev.id, cursor: prev.text.length };
+                    await deleteTodo(uid, todo.id);
+                } else {
+                    // Has text: merge into previous line at join point
+                    const cursorPos = prev.text.length;
+                    focusTarget = { id: prev.id, cursor: cursorPos };
+                    const existing = debounceMap.get(todo.id);
+                    if (existing) { clearTimeout(existing); debounceMap.delete(todo.id); }
+                    await updateTodoText(uid, prev.id, prev.text + input.value);
+                    await deleteTodo(uid, todo.id);
+                }
             }
         });
 
