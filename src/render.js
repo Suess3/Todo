@@ -8,6 +8,12 @@ const dirtyIds = new Set(); // todo IDs with unsaved text changes
 
 let currentTodos = [];
 let focusTarget = null; // { id, cursor } to restore after render
+let currentPage = 'todo';
+
+export function setPage(page) {
+    currentPage = page;
+    renderApp(currentTodos);
+}
 
 // Save all dirty todos to Firestore
 export async function flushDirty() {
@@ -54,12 +60,16 @@ export function renderApp(todos) {
         end: active.selectionEnd
     } : null;
 
-    const today = getTodayEpoch();
     const container = document.getElementById('app-content');
     container.innerHTML = '';
 
-    for (let i = -1; i <= 6; i++) {
-        renderDaySection(container, today + i, today, todos, uid);
+    if (currentPage === 'todo') {
+        const today = getTodayEpoch();
+        for (let i = -1; i <= 6; i++) {
+            renderDaySection(container, today + i, today, todos, uid);
+        }
+    } else {
+        renderFlatSection(container, todos, uid);
     }
 
     // Restore focus
@@ -280,4 +290,155 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
 
     section.appendChild(list);
     container.appendChild(section);
+}
+
+function renderFlatSection(container, allTodos, uid) {
+    const pageTodos = allTodos.filter(t => t.page === currentPage);
+
+    const list = document.createElement('div');
+    list.className = 'todo-list flat-list';
+
+    pageTodos.forEach(todo => {
+        const row = document.createElement('div');
+        row.className = `todo-row${todo.isDone ? ' done' : ''}`;
+
+        const checkWrapper = document.createElement('div');
+        checkWrapper.className = 'checkbox-wrapper';
+        const checkbox = document.createElement('div');
+        checkbox.className = ['checkbox', todo.isDone ? 'checked' : ''].join(' ').trim();
+        checkbox.textContent = todo.isDone ? '✓' : '';
+        checkWrapper.appendChild(checkbox);
+        checkWrapper.addEventListener('click', () => toggleTodo(uid, todo.id, !todo.isDone));
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.dataset.id = todo.id;
+        input.className = `todo-input${todo.isDone ? ' done' : ''}`;
+        input.value = todo.text;
+
+        input.addEventListener('input', () => {
+            const idx = currentTodos.findIndex(t => t.id === todo.id);
+            currentTodos[idx] = { ...currentTodos[idx], text: input.value };
+            dirtyIds.add(todo.id);
+        });
+
+        input.addEventListener('blur', () => {
+            const uid2 = auth.currentUser?.uid;
+            if (!uid2 || !dirtyIds.has(todo.id)) return;
+            dirtyIds.delete(todo.id);
+            const current = currentTodos.find(t => t.id === todo.id);
+            if (current) updateTodoText(uid2, todo.id, current.text);
+        });
+
+        const siblings = () => currentTodos.filter(t => t.page === currentPage);
+
+        let enterInFlight = false;
+        input.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (enterInFlight) return;
+                enterInFlight = true;
+
+                const cursor = input.selectionStart;
+                const before = input.value.slice(0, cursor);
+                const after = input.value.slice(cursor);
+                const idx = currentTodos.findIndex(t => t.id === todo.id);
+                const sibs = siblings();
+                const sibIdx = sibs.findIndex(t => t.id === todo.id);
+                const nextSib = sibs[sibIdx + 1];
+                const currentOrder = currentTodos[idx].sortOrder;
+                const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
+                const newSortOrder = (currentOrder + nextOrder) / 2;
+
+                currentTodos[idx] = { ...currentTodos[idx], text: before };
+                dirtyIds.add(todo.id);
+
+                const tempId = '_pending_' + Date.now();
+                const tempTodo = {
+                    id: tempId, text: after, isDone: false,
+                    dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage,
+                };
+                currentTodos = [
+                    ...currentTodos.slice(0, idx + 1),
+                    tempTodo,
+                    ...currentTodos.slice(idx + 1),
+                ];
+                focusTarget = { id: tempId, cursor: 0 };
+                renderApp(currentTodos);
+
+                const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage);
+                currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
+                focusTarget = { id: newDoc.id, cursor: 0 };
+                renderApp(currentTodos);
+                enterInFlight = false;
+            }
+
+            if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
+                e.preventDefault();
+                const sibs = siblings();
+                const sibIdx = sibs.findIndex(t => t.id === todo.id);
+                const prev = sibs[sibIdx - 1];
+
+                if (!prev && input.value === '') {
+                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
+                    dirtyIds.delete(todo.id);
+                    renderApp(currentTodos);
+                    deleteTodo(uid, todo.id);
+                    return;
+                }
+                if (!prev) return;
+
+                if (input.value === '') {
+                    focusTarget = { id: prev.id, cursor: prev.text.length };
+                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
+                    dirtyIds.delete(todo.id);
+                    renderApp(currentTodos);
+                    deleteTodo(uid, todo.id);
+                } else {
+                    const mergedText = prev.text + input.value;
+                    const splitCursor = prev.text.length;
+                    const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
+                    currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
+                    dirtyIds.add(prev.id);
+                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
+                    dirtyIds.delete(todo.id);
+                    focusTarget = { id: prev.id, cursor: splitCursor };
+                    renderApp(currentTodos);
+                    deleteTodo(uid, todo.id);
+                }
+            }
+
+            if (e.key === 'ArrowUp' && input.selectionStart === 0) {
+                e.preventDefault();
+                const sibs = siblings();
+                const prev = sibs[sibs.findIndex(t => t.id === todo.id) - 1];
+                if (prev) {
+                    const el = document.querySelector(`[data-id="${prev.id}"]`);
+                    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+                }
+            }
+
+            if (e.key === 'ArrowDown' && input.selectionStart === input.value.length) {
+                e.preventDefault();
+                const sibs = siblings();
+                const next = sibs[sibs.findIndex(t => t.id === todo.id) + 1];
+                if (next) {
+                    const el = document.querySelector(`[data-id="${next.id}"]`);
+                    if (el) { el.focus(); el.setSelectionRange(0, 0); }
+                }
+            }
+        });
+
+        row.appendChild(checkWrapper);
+        row.appendChild(input);
+        list.appendChild(row);
+    });
+
+    const addBtn = document.createElement('div');
+    addBtn.className = 'tap-to-add';
+    if (pageTodos.length === 0) addBtn.textContent = 'No items (tap to add)';
+    addBtn.addEventListener('click', () => addTodo(uid, 0, '', Date.now(), currentPage));
+    list.appendChild(addBtn);
+
+    container.appendChild(list);
 }

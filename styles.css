@@ -125,6 +125,33 @@ body {
     box-sizing: border-box;
 }
 
+/* --- PAGE TABS --- */
+.page-tabs {
+    width: 100%;
+    max-width: 600px;
+    display: flex;
+    border-bottom: 1px solid #333;
+    padding: 0 20px;
+    box-sizing: border-box;
+    margin-top: 4px;
+}
+
+.page-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #666;
+    font-family: 'IM Fell English', serif;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 10px 14px;
+    margin-bottom: -1px;
+    white-space: nowrap;
+}
+
+.page-tab:hover { color: #aaa; }
+.page-tab.active { color: white; border-bottom-color: #4285F4; }
+
 /* --- DAY SECTIONS --- */
 .day-section {
     margin-bottom: 48px;

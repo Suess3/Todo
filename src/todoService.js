@@ -40,13 +40,14 @@ export function subscribeTodos(uid, callback) {
     });
 }
 
-export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now()) {
+export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now(), page = 'todo') {
     return addDoc(todosRef(uid), {
         text,
         isDone: false,
         dateEpochDay: dateEpoch,
         sortOrder,
-        moveCount: 0
+        moveCount: 0,
+        page,
     });
 }
 

@@ -1,6 +1,6 @@
 import { initAuth, renderAuthScreen, signOutUser } from './auth.js';
 import { moveTodos, subscribeTodos } from './todoService.js';
-import { scheduleRender, flushDirty } from './render.js';
+import { scheduleRender, flushDirty, setPage } from './render.js';
 
 let unsubscribe = null;
 let currentUid = null;
@@ -11,6 +11,15 @@ window.addEventListener('beforeunload', flushDirty);
 function showApp() {
     document.getElementById('auth-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    const tabs = document.getElementById('page-tabs');
+    tabs.classList.remove('hidden');
+    tabs.querySelectorAll('.page-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            tabs.querySelectorAll('.page-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            setPage(btn.dataset.page);
+        });
+    });
 }
 
 function showAuth() {
