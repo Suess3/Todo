@@ -40,12 +40,12 @@ export function subscribeTodos(uid, callback) {
     });
 }
 
-export async function addTodo(uid, dateEpoch, text = '') {
+export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now()) {
     return addDoc(todosRef(uid), {
         text,
         isDone: false,
         dateEpochDay: dateEpoch,
-        sortOrder: Date.now(),
+        sortOrder,
         moveCount: 0
     });
 }

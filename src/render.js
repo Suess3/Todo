@@ -143,46 +143,124 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
             dirtyIds.add(todo.id);
         });
 
+        // Bug 6: save on blur so changes aren't lost when clicking away
+        input.addEventListener('blur', () => {
+            const uid2 = auth.currentUser?.uid;
+            if (!uid2 || !dirtyIds.has(todo.id)) return;
+            dirtyIds.delete(todo.id);
+            const current = currentTodos.find(t => t.id === todo.id);
+            if (current) updateTodoText(uid2, todo.id, current.text);
+        });
+
+        let enterInFlight = false; // Bug 1: guard against double Enter
         input.addEventListener('keydown', async (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
+                if (enterInFlight) return; // Bug 1: ignore rapid second press
+                enterInFlight = true;
+
                 const cursor = input.selectionStart;
                 const before = input.value.slice(0, cursor);
                 const after = input.value.slice(cursor);
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
+
+                // Bug 2: insert new todo right after current, not at the end
+                const next = currentTodos.find(
+                    (t, i) => i > idx && t.dateEpochDay === dateEpoch
+                );
+                const currentOrder = currentTodos[idx].sortOrder;
+                const nextOrder = next ? next.sortOrder : currentOrder + 2000;
+                const newSortOrder = (currentOrder + nextOrder) / 2;
+
                 currentTodos[idx] = { ...currentTodos[idx], text: before };
                 dirtyIds.add(todo.id);
-                const newDoc = await addTodo(uid, dateEpoch, after);
+
+                // Bug 4: set focusTarget and render locally before the async write
+                const tempId = '_pending_' + Date.now();
+                const tempTodo = {
+                    id: tempId,
+                    text: after,
+                    isDone: false,
+                    dateEpochDay: dateEpoch,
+                    sortOrder: newSortOrder,
+                    moveCount: 0,
+                };
+                currentTodos = [
+                    ...currentTodos.slice(0, idx + 1),
+                    tempTodo,
+                    ...currentTodos.slice(idx + 1),
+                ];
+                focusTarget = { id: tempId, cursor: 0 };
+                renderApp(currentTodos);
+
+                const newDoc = await addTodo(uid, dateEpoch, after, newSortOrder);
+
+                // Replace temp entry with real Firestore id
+                currentTodos = currentTodos.map(t =>
+                    t.id === tempId ? { ...t, id: newDoc.id } : t
+                );
                 focusTarget = { id: newDoc.id, cursor: 0 };
+                renderApp(currentTodos);
+
+                enterInFlight = false;
             }
 
-            if (e.key === 'Backspace' && input.value === '') {
+            // Bug 3: Backspace at start of non-empty line — merge with previous line
+            if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
                 e.preventDefault();
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
-                const prev = currentTodos[idx - 1];
-                focusTarget = prev && prev.dateEpochDay === dateEpoch
-                    ? { id: prev.id, cursor: prev.text.length }
-                    : null;
-                currentTodos = currentTodos.filter(t => t.id !== todo.id);
-                dirtyIds.delete(todo.id);
-                renderApp(currentTodos);
-                deleteTodo(uid, todo.id);
+                const prev = currentTodos.slice(0, idx).reverse().find(t => t.dateEpochDay === dateEpoch);
+                if (!prev && input.value === '') {
+                    // Empty first line of day — just delete it
+                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
+                    dirtyIds.delete(todo.id);
+                    renderApp(currentTodos);
+                    deleteTodo(uid, todo.id);
+                    return;
+                }
+                if (!prev) return; // nothing above on this day
+
+                if (input.value === '') {
+                    // Empty line: delete and move focus up
+                    focusTarget = { id: prev.id, cursor: prev.text.length };
+                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
+                    dirtyIds.delete(todo.id);
+                    renderApp(currentTodos);
+                    deleteTodo(uid, todo.id);
+                } else {
+                    // Non-empty line: merge text onto previous line
+                    const mergedText = prev.text + input.value;
+                    const splitCursor = prev.text.length;
+                    const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
+                    currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
+                    dirtyIds.add(prev.id);
+                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
+                    dirtyIds.delete(todo.id);
+                    focusTarget = { id: prev.id, cursor: splitCursor };
+                    renderApp(currentTodos);
+                    deleteTodo(uid, todo.id);
+                }
             }
 
+            // Bug 5: arrow keys — move focus directly, no re-render needed
             if (e.key === 'ArrowUp' && input.selectionStart === 0) {
                 e.preventDefault();
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
-                const prev = currentTodos[idx - 1];
-                if (prev) focusTarget = { id: prev.id, cursor: prev.text.length };
-                renderApp(currentTodos);
+                const prev = currentTodos.slice(0, idx).reverse().find(t => t.dateEpochDay === dateEpoch);
+                if (prev) {
+                    const el = document.querySelector(`[data-id="${prev.id}"]`);
+                    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+                }
             }
 
             if (e.key === 'ArrowDown' && input.selectionStart === input.value.length) {
                 e.preventDefault();
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
-                const next = currentTodos[idx + 1];
-                if (next) focusTarget = { id: next.id, cursor: 0 };
-                renderApp(currentTodos);
+                const next = currentTodos.slice(idx + 1).find(t => t.dateEpochDay === dateEpoch);
+                if (next) {
+                    const el = document.querySelector(`[data-id="${next.id}"]`);
+                    if (el) { el.focus(); el.setSelectionRange(0, 0); }
+                }
             }
         });
 
