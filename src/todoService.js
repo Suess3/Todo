@@ -18,7 +18,7 @@ export async function moveTodos(uid) {
     const today = getTodayEpoch();
     const q = query(todosRef(uid), where('isDone', '==', false));
     const snapshot = await getDocs(q);
-    const toMove = snapshot.docs.filter(d => d.data().dateEpochDay < today);
+    const toMove = snapshot.docs.filter(d => d.data().dateEpochDay < today - 1);
     if (toMove.length === 0) return;
 
     const batch = writeBatch(db);
