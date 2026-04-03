@@ -146,49 +146,28 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         input.addEventListener('keydown', async (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                const cursor = input.selectionStart;
-                const before = input.value.slice(0, cursor);
-                const after = input.value.slice(cursor);
-
-                // Update current todo locally and in Firestore
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
-                currentTodos[idx] = { ...currentTodos[idx], text: before };
-                dirtyIds.delete(todo.id);
-                updateTodoText(uid, todo.id, before);
-
-                // Create new todo
-                const newDoc = await addTodo(uid, dateEpoch, after);
+                const newDoc = await addTodo(uid, dateEpoch, '');
                 focusTarget = { id: newDoc.id, cursor: 0 };
                 currentTodos = [
                     ...currentTodos.slice(0, idx + 1),
-                    { id: newDoc.id, text: after, isDone: false, dateEpochDay: dateEpoch, sortOrder: Date.now(), moveCount: 0 },
+                    { id: newDoc.id, text: '', isDone: false, dateEpochDay: dateEpoch, sortOrder: Date.now(), moveCount: 0 },
                     ...currentTodos.slice(idx + 1)
                 ];
                 renderApp(currentTodos);
             }
 
-            if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
+            if (e.key === 'Backspace' && input.value === '') {
                 e.preventDefault();
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
                 const prev = currentTodos[idx - 1];
-                if (!prev || prev.dateEpochDay !== dateEpoch) return;
-
-                if (input.value === '') {
-                    focusTarget = { id: prev.id, cursor: prev.text.length };
-                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
-                    dirtyIds.delete(todo.id);
-                    renderApp(currentTodos);
-                    deleteTodo(uid, todo.id);
-                } else {
-                    const merged = prev.text + input.value;
-                    focusTarget = { id: prev.id, cursor: prev.text.length };
-                    currentTodos[idx - 1] = { ...prev, text: merged };
-                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
-                    dirtyIds.delete(todo.id);
-                    dirtyIds.add(prev.id);
-                    renderApp(currentTodos);
-                    deleteTodo(uid, todo.id);
-                }
+                focusTarget = prev && prev.dateEpochDay === dateEpoch
+                    ? { id: prev.id, cursor: prev.text.length }
+                    : null;
+                currentTodos = currentTodos.filter(t => t.id !== todo.id);
+                dirtyIds.delete(todo.id);
+                renderApp(currentTodos);
+                deleteTodo(uid, todo.id);
             }
         });
 
