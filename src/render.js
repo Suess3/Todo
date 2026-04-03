@@ -157,6 +157,17 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 const newDoc = await addTodo(uid, dateEpoch, after);
                 focusId = newDoc.id;
                 pendingRender = false;
+
+                // Optimistically update local state so render is immediate
+                const idx = currentTodos.findIndex(t => t.id === todo.id);
+                const updatedCurrent = { ...currentTodos[idx], text: before };
+                const newTodo = { id: newDoc.id, text: after, isDone: false, dateEpochDay: dateEpoch, sortOrder: Date.now(), moveCount: 0 };
+                currentTodos = [
+                    ...currentTodos.slice(0, idx),
+                    updatedCurrent,
+                    newTodo,
+                    ...currentTodos.slice(idx + 1)
+                ];
                 renderApp(currentTodos);
             }
             if (e.key === 'Backspace' && input.value === '') {
