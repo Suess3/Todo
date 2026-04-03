@@ -144,9 +144,11 @@ body {
     font-family: 'IM Fell English', serif;
     font-size: 16px;
     cursor: pointer;
-    padding: 10px 14px;
+    padding: 10px 0;
     margin-bottom: -1px;
     white-space: nowrap;
+    flex: 1;
+    text-align: center;
 }
 
 .page-tab:hover { color: #aaa; }
