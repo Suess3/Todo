@@ -7,6 +7,7 @@ const debounceMap = new Map();
 
 let currentTodos = [];
 let pendingRender = false;
+let focusId = null; // ID of todo to focus after next render
 
 // Called from app.js on every Firestore update.
 // Defers the render if a todo-input is focused (user is actively typing).
@@ -106,9 +107,15 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         // Input — value set via .value to avoid XSS
         const input = document.createElement('input');
         input.type = 'text';
+        input.dataset.id = todo.id;
         input.className = `todo-input${todo.isDone ? ' done' : ''}`;
         input.value = todo.text;
         input.style.color = textColor;
+
+        if (focusId === todo.id) {
+            focusId = null;
+            requestAnimationFrame(() => { input.focus(); input.setSelectionRange(0, 0); });
+        }
 
         input.addEventListener('input', () => {
             const existing = debounceMap.get(todo.id);
@@ -136,9 +143,19 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         input.addEventListener('keydown', async (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
+                const cursor = input.selectionStart;
+                const before = input.value.slice(0, cursor);
+                const after = input.value.slice(cursor);
+
+                // Cancel debounce and save the before-text immediately
+                const existing = debounceMap.get(todo.id);
+                if (existing) { clearTimeout(existing); debounceMap.delete(todo.id); }
+                await updateTodoText(uid, todo.id, before);
+
+                // Create new todo with the after-text and focus it when it renders
+                const newDoc = await addTodo(uid, dateEpoch, after);
+                focusId = newDoc.id;
                 pendingRender = false;
-                await addTodo(uid, dateEpoch);
-                renderApp(currentTodos);
             }
             if (e.key === 'Backspace' && input.value === '') {
                 e.preventDefault();

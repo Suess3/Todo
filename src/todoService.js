@@ -40,9 +40,9 @@ export function subscribeTodos(uid, callback) {
     });
 }
 
-export async function addTodo(uid, dateEpoch) {
+export async function addTodo(uid, dateEpoch, text = '') {
     return addDoc(todosRef(uid), {
-        text: '',
+        text,
         isDone: false,
         dateEpochDay: dateEpoch,
         sortOrder: Date.now(),
