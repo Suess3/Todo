@@ -2,26 +2,17 @@ import { auth } from './firebase.js';
 import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, deleteTodo } from './todoService.js';
 
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const expandedStates = {};
 const debounceMap = new Map();
 
 let currentTodos = [];
-let pendingRender = false;
 let focusId = null; // ID of todo to focus after next render
 
-// Called from app.js on every Firestore update.
-// Defers the render if a todo-input is focused (user is actively typing).
 export function scheduleRender(todos) {
     currentTodos = todos;
-    const active = document.activeElement;
-    if (active && active.classList.contains('todo-input')) {
-        pendingRender = true;
-        return;
-    }
     renderApp(todos);
 }
-
-const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
 function formatDate(epoch) {
     const d = new Date(epoch * 86400000);
@@ -36,12 +27,30 @@ export function renderApp(todos) {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
+    // Save focused input state before wiping the DOM
+    const active = document.activeElement;
+    const savedFocus = (active && active.dataset.id) ? {
+        id: active.dataset.id,
+        start: active.selectionStart,
+        end: active.selectionEnd
+    } : null;
+
     const today = getTodayEpoch();
     const container = document.getElementById('app-content');
     container.innerHTML = '';
 
     for (let i = -1; i <= 6; i++) {
         renderDaySection(container, today + i, today, todos, uid);
+    }
+
+    // Restore focus after render
+    if (focusId) {
+        const el = container.querySelector(`[data-id="${focusId}"]`);
+        if (el) { el.focus(); el.setSelectionRange(0, 0); }
+        focusId = null;
+    } else if (savedFocus) {
+        const el = container.querySelector(`[data-id="${savedFocus.id}"]`);
+        if (el) { el.focus(); el.setSelectionRange(savedFocus.start, savedFocus.end); }
     }
 }
 
@@ -68,7 +77,7 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
     `;
     header.addEventListener('click', () => {
         expandedStates[dateEpoch] = !expandedStates[dateEpoch];
-        scheduleRender(currentTodos);
+        renderApp(currentTodos);
     });
     section.appendChild(header);
 
@@ -80,7 +89,6 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         const row = document.createElement('div');
         row.className = `todo-row${todo.isDone ? ' done' : ''}`;
 
-        // Color: done or past = gray (handled by CSS .done), else by moveCount
         let textColor = 'white';
         if (todo.isDone || isPast) {
             textColor = 'gray';
@@ -96,27 +104,18 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         const checkWrapper = document.createElement('div');
         checkWrapper.className = 'checkbox-wrapper';
         const checkbox = document.createElement('div');
-        checkbox.className = [
-            'checkbox',
-            todo.isDone ? 'checked' : '',
-            isToday && !todo.isDone ? 'today-unchecked' : ''
-        ].join(' ').trim();
+        checkbox.className = ['checkbox', todo.isDone ? 'checked' : '', isToday && !todo.isDone ? 'today-unchecked' : ''].join(' ').trim();
         checkbox.textContent = todo.isDone ? '✓' : '';
         checkWrapper.appendChild(checkbox);
         checkWrapper.addEventListener('click', () => toggleTodo(uid, todo.id, !todo.isDone));
 
-        // Input — value set via .value to avoid XSS
+        // Input
         const input = document.createElement('input');
         input.type = 'text';
         input.dataset.id = todo.id;
         input.className = `todo-input${todo.isDone ? ' done' : ''}`;
         input.value = todo.text;
         input.style.color = textColor;
-
-        if (focusId === todo.id) {
-            focusId = null;
-            requestAnimationFrame(() => { input.focus(); input.setSelectionRange(0, 0); });
-        }
 
         input.addEventListener('input', () => {
             const existing = debounceMap.get(todo.id);
@@ -128,16 +127,11 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         });
 
         input.addEventListener('blur', () => {
-            // Flush any pending debounce immediately on blur
             const existing = debounceMap.get(todo.id);
             if (existing) {
                 clearTimeout(existing);
                 debounceMap.delete(todo.id);
                 updateTodoText(uid, todo.id, input.value);
-            }
-            if (pendingRender) {
-                pendingRender = false;
-                renderApp(currentTodos);
             }
         });
 
@@ -148,33 +142,16 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 const before = input.value.slice(0, cursor);
                 const after = input.value.slice(cursor);
 
-                // Cancel debounce and save the before-text immediately
                 const existing = debounceMap.get(todo.id);
                 if (existing) { clearTimeout(existing); debounceMap.delete(todo.id); }
                 await updateTodoText(uid, todo.id, before);
 
-                // Create new todo with the after-text and focus it when it renders
                 const newDoc = await addTodo(uid, dateEpoch, after);
                 focusId = newDoc.id;
-                pendingRender = false;
-
-                // Optimistically update local state so render is immediate
-                const idx = currentTodos.findIndex(t => t.id === todo.id);
-                const updatedCurrent = { ...currentTodos[idx], text: before };
-                const newTodo = { id: newDoc.id, text: after, isDone: false, dateEpochDay: dateEpoch, sortOrder: Date.now(), moveCount: 0 };
-                currentTodos = [
-                    ...currentTodos.slice(0, idx),
-                    updatedCurrent,
-                    newTodo,
-                    ...currentTodos.slice(idx + 1)
-                ];
-                renderApp(currentTodos);
             }
             if (e.key === 'Backspace' && input.value === '') {
                 e.preventDefault();
-                pendingRender = false;
                 await deleteTodo(uid, todo.id);
-                renderApp(currentTodos);
             }
         });
 
