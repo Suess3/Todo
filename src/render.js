@@ -157,6 +157,7 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 const newDoc = await addTodo(uid, dateEpoch, after);
                 focusId = newDoc.id;
                 pendingRender = false;
+                renderApp(currentTodos);
             }
             if (e.key === 'Backspace' && input.value === '') {
                 e.preventDefault();
