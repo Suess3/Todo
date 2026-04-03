@@ -4,14 +4,33 @@ import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, deleteTodo } from '
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const expandedStates = {};
-const debounceMap = new Map();
+const dirtyIds = new Set(); // todo IDs with unsaved text changes
 
 let currentTodos = [];
-let focusTarget = null; // { id, cursor } to focus after next render
+let focusTarget = null; // { id, cursor } to restore after render
+
+// Save all dirty todos to Firestore
+export async function flushDirty() {
+    const uid = auth.currentUser?.uid;
+    if (!uid || dirtyIds.size === 0) return;
+    const ids = [...dirtyIds];
+    dirtyIds.clear();
+    for (const id of ids) {
+        const todo = currentTodos.find(t => t.id === id);
+        if (todo) await updateTodoText(uid, id, todo.text);
+    }
+}
 
 export function scheduleRender(todos) {
-    currentTodos = todos;
-    renderApp(todos);
+    // Preserve any unsaved local text edits — don't let Firestore overwrite them
+    currentTodos = todos.map(t => {
+        if (dirtyIds.has(t.id)) {
+            const local = currentTodos.find(l => l.id === t.id);
+            return local || t;
+        }
+        return t;
+    });
+    renderApp(currentTodos);
 }
 
 function formatDate(epoch) {
@@ -43,7 +62,7 @@ export function renderApp(todos) {
         renderDaySection(container, today + i, today, todos, uid);
     }
 
-    // Restore focus after render
+    // Restore focus
     if (focusTarget) {
         const el = container.querySelector(`[data-id="${focusTarget.id}"]`);
         if (el) { el.focus(); el.setSelectionRange(focusTarget.cursor, focusTarget.cursor); }
@@ -117,22 +136,11 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         input.value = todo.text;
         input.style.color = textColor;
 
+        // Typing: update local state only, mark dirty for periodic save
         input.addEventListener('input', () => {
-            const existing = debounceMap.get(todo.id);
-            if (existing) clearTimeout(existing);
-            debounceMap.set(todo.id, setTimeout(() => {
-                updateTodoText(uid, todo.id, input.value);
-                debounceMap.delete(todo.id);
-            }, 500));
-        });
-
-        input.addEventListener('blur', () => {
-            const existing = debounceMap.get(todo.id);
-            if (existing) {
-                clearTimeout(existing);
-                debounceMap.delete(todo.id);
-                updateTodoText(uid, todo.id, input.value);
-            }
+            const idx = currentTodos.findIndex(t => t.id === todo.id);
+            currentTodos[idx] = { ...currentTodos[idx], text: input.value };
+            dirtyIds.add(todo.id);
         });
 
         input.addEventListener('keydown', async (e) => {
@@ -142,21 +150,23 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 const before = input.value.slice(0, cursor);
                 const after = input.value.slice(cursor);
 
-                const existing = debounceMap.get(todo.id);
-                if (existing) { clearTimeout(existing); debounceMap.delete(todo.id); }
-                await updateTodoText(uid, todo.id, before);
+                // Update current todo locally and in Firestore
+                const idx = currentTodos.findIndex(t => t.id === todo.id);
+                currentTodos[idx] = { ...currentTodos[idx], text: before };
+                dirtyIds.delete(todo.id);
+                updateTodoText(uid, todo.id, before);
 
+                // Create new todo
                 const newDoc = await addTodo(uid, dateEpoch, after);
                 focusTarget = { id: newDoc.id, cursor: 0 };
-                const idx = currentTodos.findIndex(t => t.id === todo.id);
                 currentTodos = [
-                    ...currentTodos.slice(0, idx),
-                    { ...currentTodos[idx], text: before },
+                    ...currentTodos.slice(0, idx + 1),
                     { id: newDoc.id, text: after, isDone: false, dateEpochDay: dateEpoch, sortOrder: Date.now(), moveCount: 0 },
                     ...currentTodos.slice(idx + 1)
                 ];
                 renderApp(currentTodos);
             }
+
             if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
                 e.preventDefault();
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
@@ -164,17 +174,20 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 if (!prev || prev.dateEpochDay !== dateEpoch) return;
 
                 if (input.value === '') {
-                    // Empty line: delete and move cursor to end of previous
                     focusTarget = { id: prev.id, cursor: prev.text.length };
-                    await deleteTodo(uid, todo.id);
+                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
+                    dirtyIds.delete(todo.id);
+                    renderApp(currentTodos);
+                    deleteTodo(uid, todo.id);
                 } else {
-                    // Has text: merge into previous line at join point
-                    const cursorPos = prev.text.length;
-                    focusTarget = { id: prev.id, cursor: cursorPos };
-                    const existing = debounceMap.get(todo.id);
-                    if (existing) { clearTimeout(existing); debounceMap.delete(todo.id); }
-                    await updateTodoText(uid, prev.id, prev.text + input.value);
-                    await deleteTodo(uid, todo.id);
+                    const merged = prev.text + input.value;
+                    focusTarget = { id: prev.id, cursor: prev.text.length };
+                    currentTodos[idx - 1] = { ...prev, text: merged };
+                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
+                    dirtyIds.delete(todo.id);
+                    dirtyIds.add(prev.id);
+                    renderApp(currentTodos);
+                    deleteTodo(uid, todo.id);
                 }
             }
         });

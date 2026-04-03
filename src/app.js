@@ -1,9 +1,12 @@
 import { initAuth, renderAuthScreen, signOutUser } from './auth.js';
 import { moveTodos, subscribeTodos } from './todoService.js';
-import { scheduleRender } from './render.js';
+import { scheduleRender, flushDirty } from './render.js';
 
 let unsubscribe = null;
 let currentUid = null;
+let saveInterval = null;
+
+window.addEventListener('beforeunload', flushDirty);
 
 function showApp() {
     document.getElementById('auth-screen').classList.add('hidden');
@@ -31,13 +34,14 @@ initAuth(
         unsubscribe = subscribeTodos(user.uid, (todos) => {
             scheduleRender(todos);
         });
+
+        if (saveInterval) clearInterval(saveInterval);
+        saveInterval = setInterval(flushDirty, 60000);
     },
     () => {
         currentUid = null;
-        if (unsubscribe) {
-            unsubscribe();
-            unsubscribe = null;
-        }
+        if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+        if (saveInterval) { clearInterval(saveInterval); saveInterval = null; }
         showAuth();
     }
 );
