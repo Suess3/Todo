@@ -86,7 +86,7 @@ export function renderApp(todos) {
 function renderDaySection(container, dateEpoch, today, allTodos, uid) {
     const isToday = dateEpoch === today;
     const isPast = dateEpoch < today;
-    const dayTodos = allTodos.filter(t => t.dateEpochDay === dateEpoch);
+    const dayTodos = allTodos.filter(t => t.dateEpochDay === dateEpoch && (!t.page || t.page === 'todo'));
 
     if (expandedStates[dateEpoch] === undefined) {
         expandedStates[dateEpoch] = !isPast;
