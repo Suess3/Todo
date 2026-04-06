@@ -37,12 +37,12 @@ initAuth(
 
         document.getElementById('signout-btn').onclick = signOutUser;
 
-        try { await moveTodos(user.uid); } catch (e) { console.error('moveTodos:', e); }
-
         if (unsubscribe) unsubscribe();
         unsubscribe = subscribeTodos(user.uid, (todos) => {
             scheduleRender(todos);
         });
+
+        try { await moveTodos(user.uid); } catch (e) { console.error('moveTodos:', e); }
 
         if (saveInterval) clearInterval(saveInterval);
         saveInterval = setInterval(flushDirty, 60000);
