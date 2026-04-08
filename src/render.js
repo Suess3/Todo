@@ -122,11 +122,11 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         if (todo.isDone || isPast) {
             textColor = 'gray';
         } else if (todo.moveCount === 1) {
-            textColor = '#FFFFE6';
+            textColor = '#FFD700';
         } else if (todo.moveCount === 2) {
-            textColor = '#FFEFE0';
+            textColor = '#FFA040';
         } else if (todo.moveCount >= 3) {
-            textColor = '#FFEBEB';
+            textColor = '#FF6B6B';
         }
 
         // Checkbox
