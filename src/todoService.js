@@ -5,7 +5,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 export function getTodayEpoch() {
-    return Math.floor(Date.now() / 86400000);
+    const now = new Date();
+    return Math.floor(new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 86400000);
 }
 
 function todosRef(uid) {
