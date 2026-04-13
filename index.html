@@ -14,7 +14,35 @@
     <div id="auth-screen" class="hidden"></div>
     <div id="app" class="hidden">
         <div class="app-header">
+            <button id="settings-btn" class="settings-btn">⚙︎</button>
             <button id="signout-btn" class="signout-btn">Sign out</button>
+        </div>
+
+        <div id="settings-modal" class="modal-overlay hidden">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <span>Settings</span>
+                    <button id="settings-close" class="modal-close">✕</button>
+                </div>
+                <div class="setting-row">
+                    <span>Light mode</span>
+                    <label class="toggle">
+                        <input type="checkbox" id="theme-toggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="setting-row">
+                    <span>Daily reminder</span>
+                    <label class="toggle">
+                        <input type="checkbox" id="reminder-toggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="setting-row" id="reminder-time-row">
+                    <span>Reminder time</span>
+                    <input type="time" id="reminder-time" value="22:00" class="time-input">
+                </div>
+            </div>
         </div>
         <div id="page-tabs" class="page-tabs hidden">
             <button class="page-tab active" data-page="todo">Todo</button>

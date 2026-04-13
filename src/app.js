@@ -1,10 +1,14 @@
 import { initAuth, renderAuthScreen, signOutUser } from './auth.js';
 import { moveTodos, subscribeTodos } from './todoService.js';
 import { scheduleRender, flushDirty, setPage } from './render.js';
+import { applyTheme, initSettings, initReminder } from './settings.js';
 
 let unsubscribe = null;
 let currentUid = null;
 let saveInterval = null;
+
+applyTheme();
+initReminder();
 
 window.addEventListener('beforeunload', flushDirty);
 
@@ -36,6 +40,7 @@ initAuth(
         showApp();
 
         document.getElementById('signout-btn').onclick = signOutUser;
+        initSettings();
 
         if (unsubscribe) unsubscribe();
         unsubscribe = subscribeTodos(user.uid, (todos) => {
