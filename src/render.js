@@ -118,9 +118,9 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         const row = document.createElement('div');
         row.className = `todo-row${todo.isDone ? ' done' : ''}`;
 
-        let textColor = 'white';
+        let textColor = 'var(--text)';
         if (todo.isDone || isPast) {
-            textColor = 'gray';
+            textColor = 'var(--text-muted)';
         } else if (todo.moveCount === 1) {
             textColor = '#FFD700';
         } else if (todo.moveCount === 2) {
