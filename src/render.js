@@ -122,11 +122,11 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         if (todo.isDone || isPast) {
             textColor = 'var(--text-muted)';
         } else if (todo.moveCount === 1) {
-            textColor = '#FFD700';
+            textColor = '#E8D99A';
         } else if (todo.moveCount === 2) {
-            textColor = '#FFA040';
+            textColor = '#E0B98A';
         } else if (todo.moveCount >= 3) {
-            textColor = '#FF6B6B';
+            textColor = '#E09090';
         }
 
         // Checkbox
@@ -319,11 +319,11 @@ function renderFlatSection(container, allTodos, uid) {
         if (currentPage === 'soon' && !todo.isDone && todo.createdAt) {
             const ageWeeks = (Date.now() - todo.createdAt) / (7 * 24 * 60 * 60 * 1000);
             if (ageWeeks >= 3) {
-                input.style.color = '#E8A0A0';
+                input.style.color = '#E09090';
             } else if (ageWeeks >= 2) {
-                input.style.color = '#C8A882';
+                input.style.color = '#E0B98A';
             } else if (ageWeeks >= 1) {
-                input.style.color = '#EDE0C4';
+                input.style.color = '#E8D99A';
             }
         }
 
