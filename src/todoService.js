@@ -6,7 +6,7 @@ import {
 
 export function getTodayEpoch() {
     const now = new Date();
-    return Math.floor(new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 86400000);
+    return Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / 86400000);
 }
 
 function todosRef(uid) {
