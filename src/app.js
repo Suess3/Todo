@@ -51,6 +51,13 @@ initAuth(
 
         if (saveInterval) clearInterval(saveInterval);
         saveInterval = setInterval(flushDirty, 60000);
+
+        // Re-run moveTodos when app comes back into focus (e.g. from background on mobile)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && currentUid) {
+                moveTodos(currentUid).catch(e => console.error('moveTodos:', e));
+            }
+        });
     },
     () => {
         currentUid = null;
