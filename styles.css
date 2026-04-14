@@ -154,6 +154,12 @@ body {
     line-height: 1;
 }
 
+.version-label {
+    color: var(--text-faint);
+    font-size: 12px;
+    margin-right: 4px;
+}
+
 .app-container {
     width: 100%;
     max-width: 600px;

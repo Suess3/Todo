@@ -2,6 +2,7 @@ import { initAuth, renderAuthScreen, signOutUser } from './auth.js';
 import { moveTodos, subscribeTodos } from './todoService.js';
 import { scheduleRender, flushDirty, setPage } from './render.js';
 import { applyTheme, initSettings, initReminder } from './settings.js';
+import { VERSION } from './version.js';
 
 let unsubscribe = null;
 let currentUid = null;
@@ -9,6 +10,7 @@ let saveInterval = null;
 
 applyTheme();
 initReminder();
+document.getElementById('version-label').textContent = VERSION;
 
 window.addEventListener('beforeunload', flushDirty);
 
