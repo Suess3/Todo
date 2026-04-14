@@ -284,14 +284,14 @@ body {
     flex-grow: 1;
     margin-left: 12px;
     outline: none;
-    padding: 5px 0;
+    padding: 0;
 }
 .todo-input.done {
     text-decoration: line-through;
     color: var(--text-muted) !important;
 }
 
-/* Wrapping textarea for flat pages (Soon, Long run, Keep in mind) */
+/* Wrapping textarea for flat pages (Soon, Long run, Notes) */
 .flat-list .todo-input {
     white-space: pre-wrap;
     word-break: break-word;
@@ -299,7 +299,11 @@ body {
     resize: none;
     overflow: hidden;
     line-height: 1.4;
-    padding-top: 6px;
+    padding: 0;
+}
+
+.flat-list.todo-list {
+    gap: 0;
 }
 
 /* Tap to add */
