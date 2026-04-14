@@ -310,16 +310,23 @@ function renderFlatSection(container, allTodos, uid) {
         checkWrapper.appendChild(checkbox);
         checkWrapper.addEventListener('click', () => toggleTodo(uid, todo.id, !todo.isDone));
 
-        const input = document.createElement('input');
-        input.type = 'text';
+        const input = document.createElement('textarea');
         input.dataset.id = todo.id;
         input.className = `todo-input${todo.isDone ? ' done' : ''}`;
         input.value = todo.text;
+        input.rows = 1;
+
+        // Auto-grow height
+        const autoGrow = () => {
+            input.style.height = 'auto';
+            input.style.height = input.scrollHeight + 'px';
+        };
 
         input.addEventListener('input', () => {
             const idx = currentTodos.findIndex(t => t.id === todo.id);
             currentTodos[idx] = { ...currentTodos[idx], text: input.value };
             dirtyIds.add(todo.id);
+            autoGrow();
         });
 
         input.addEventListener('blur', () => {
@@ -329,6 +336,9 @@ function renderFlatSection(container, allTodos, uid) {
             const current = currentTodos.find(t => t.id === todo.id);
             if (current) updateTodoText(uid2, todo.id, current.text);
         });
+
+        // Set initial height after render
+        requestAnimationFrame(autoGrow);
 
         const siblings = () => currentTodos.filter(t => t.page === currentPage);
 

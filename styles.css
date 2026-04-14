@@ -291,6 +291,17 @@ body {
     color: var(--text-muted) !important;
 }
 
+/* Wrapping textarea for flat pages (Soon, Long run, Keep in mind) */
+.flat-list .todo-input {
+    white-space: pre-wrap;
+    word-break: break-word;
+    height: auto;
+    resize: none;
+    overflow: hidden;
+    line-height: 1.4;
+    padding-top: 6px;
+}
+
 /* Tap to add */
 .tap-to-add {
     height: 40px;
