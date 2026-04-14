@@ -41,11 +41,11 @@ export function scheduleRender(todos) {
 
 function formatDate(epoch) {
     const d = new Date(epoch * 86400000);
-    return d.getUTCDate().toString().padStart(2, '0') + '. ' + MONTH_NAMES[d.getUTCMonth()];
+    return d.getDate().toString().padStart(2, '0') + '. ' + MONTH_NAMES[d.getMonth()];
 }
 
 function getDayName(epoch) {
-    return DAY_NAMES[new Date(epoch * 86400000).getUTCDay()];
+    return DAY_NAMES[new Date(epoch * 86400000).getDay()];
 }
 
 export function renderApp(todos) {
