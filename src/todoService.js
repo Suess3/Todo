@@ -53,6 +53,7 @@ export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now(),
         sortOrder,
         moveCount: 0,
         page,
+        createdAt: Date.now(),
     });
 }
 

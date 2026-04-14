@@ -316,6 +316,17 @@ function renderFlatSection(container, allTodos, uid) {
         input.value = todo.text;
         input.rows = 1;
 
+        if (currentPage === 'soon' && !todo.isDone && todo.createdAt) {
+            const ageWeeks = (Date.now() - todo.createdAt) / (7 * 24 * 60 * 60 * 1000);
+            if (ageWeeks >= 3) {
+                input.style.color = '#E8A0A0';
+            } else if (ageWeeks >= 2) {
+                input.style.color = '#C8A882';
+            } else if (ageWeeks >= 1) {
+                input.style.color = '#EDE0C4';
+            }
+        }
+
         // Auto-grow height
         const autoGrow = () => {
             input.style.height = 'auto';
