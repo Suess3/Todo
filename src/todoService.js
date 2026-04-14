@@ -58,7 +58,24 @@ export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now(),
 }
 
 export async function toggleTodo(uid, id, newState) {
-    return updateDoc(doc(db, 'users', uid, 'todos', id), { isDone: newState });
+    return updateDoc(doc(db, 'users', uid, 'todos', id), {
+        isDone: newState,
+        completedAt: newState ? Date.now() : null,
+    });
+}
+
+export async function cleanupNotes(uid) {
+    const oneDayAgo = Date.now() - 86400000;
+    const q = query(todosRef(uid), where('page', '==', 'keepInMind'), where('isDone', '==', true));
+    const snapshot = await getDocs(q);
+    const batch = writeBatch(db);
+    snapshot.docs.forEach(d => {
+        const { completedAt } = d.data();
+        if (completedAt && completedAt < oneDayAgo) {
+            batch.delete(d.ref);
+        }
+    });
+    await batch.commit();
 }
 
 export async function updateTodoText(uid, id, text) {
