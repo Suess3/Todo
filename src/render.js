@@ -9,6 +9,32 @@ const dirtyIds = new Set(); // todo IDs with unsaved text changes
 let currentTodos = [];
 let focusTarget = null; // { id, cursor } to restore after render
 let currentPage = 'todo';
+let isAnimating = false;
+
+const ANIM_KEY = 'todo-animated-day';
+
+function shouldAnimate(todayEpoch) {
+    const last = parseInt(localStorage.getItem(ANIM_KEY) || '0');
+    return last !== todayEpoch;
+}
+
+function markAnimated(todayEpoch) {
+    localStorage.setItem(ANIM_KEY, String(todayEpoch));
+}
+
+async function typeInputs(inputs) {
+    isAnimating = true;
+    for (const input of inputs) {
+        const fullText = input.dataset.fullText || '';
+        input.value = '';
+        for (const char of fullText) {
+            await new Promise(r => setTimeout(r, 38));
+            input.value += char;
+        }
+        await new Promise(r => setTimeout(r, 80)); // pause between todos
+    }
+    isAnimating = false;
+}
 
 export function setPage(page) {
     currentPage = page;
@@ -52,6 +78,9 @@ export function renderApp(todos) {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
+    // Don't re-render while typing animation is running
+    if (isAnimating) return;
+
     // Save focused input state before wiping the DOM
     const active = document.activeElement;
     const savedFocus = (active && active.dataset.id) ? {
@@ -67,6 +96,17 @@ export function renderApp(todos) {
         const today = getTodayEpoch();
         for (let i = -1; i <= 6; i++) {
             renderDaySection(container, today + i, today, todos, uid);
+        }
+
+        // Typing animation on first load of the day
+        if (shouldAnimate(today)) {
+            markAnimated(today);
+            const todaySection = [...container.querySelectorAll('.day-section')][1]; // index 1 = today (index 0 = yesterday)
+            if (todaySection) {
+                const inputs = [...todaySection.querySelectorAll('.todo-input')].filter(el => el.value.trim() !== '');
+                inputs.forEach(el => { el.dataset.fullText = el.value; el.value = ''; });
+                typeInputs(inputs);
+            }
         }
     } else {
         renderFlatSection(container, todos, uid);
