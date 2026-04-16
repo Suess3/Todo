@@ -1,9 +1,15 @@
 const THEME_KEY = 'todo-theme';
 const REMINDER_KEY = 'todo-reminder';
 const URGENCY_KEY = 'todo-urgency-intensity';
+const ACCENT_KEY = 'todo-accent-hue';
 
 export function getUrgencyIntensity() {
     return parseInt(localStorage.getItem(URGENCY_KEY) ?? '50');
+}
+
+export function applyAccent() {
+    const hue = parseInt(localStorage.getItem(ACCENT_KEY) ?? '217');
+    document.documentElement.style.setProperty('--accent', `hsl(${hue}, 80%, 60%)`);
 }
 
 let reminderTimer = null;
@@ -113,5 +119,13 @@ export function initSettings() {
     urgencySlider.addEventListener('input', () => {
         localStorage.setItem(URGENCY_KEY, urgencySlider.value);
         document.dispatchEvent(new CustomEvent('urgency-changed'));
+    });
+
+    // Accent color slider
+    const accentSlider = document.getElementById('accent-slider');
+    accentSlider.value = parseInt(localStorage.getItem(ACCENT_KEY) ?? '217');
+    accentSlider.addEventListener('input', () => {
+        localStorage.setItem(ACCENT_KEY, accentSlider.value);
+        applyAccent();
     });
 }

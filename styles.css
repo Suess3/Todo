@@ -429,6 +429,40 @@ body {
     cursor: pointer;
 }
 
+/* Accent color slider */
+.accent-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 120px;
+    height: 8px;
+    border-radius: 4px;
+    outline: none;
+    cursor: pointer;
+    background: linear-gradient(to right,
+        hsl(0,80%,60%), hsl(30,80%,60%), hsl(60,80%,60%), hsl(90,80%,60%),
+        hsl(120,80%,60%), hsl(150,80%,60%), hsl(180,80%,60%), hsl(210,80%,60%),
+        hsl(240,80%,60%), hsl(270,80%,60%), hsl(300,80%,60%), hsl(330,80%,60%),
+        hsl(360,80%,60%));
+}
+.accent-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: white;
+    border: 2px solid rgba(0,0,0,0.2);
+    cursor: pointer;
+}
+.accent-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: white;
+    border: 2px solid rgba(0,0,0,0.2);
+    cursor: pointer;
+}
+
 /* Time input */
 .time-input {
     background: var(--input-bg);
