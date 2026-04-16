@@ -162,11 +162,15 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         if (todo.isDone || isPast) {
             textColor = 'var(--text-muted)';
         } else if (todo.moveCount === 1) {
-            textColor = '#E8D99A';
+            textColor = '#F0DC8A';
         } else if (todo.moveCount === 2) {
-            textColor = '#E0B98A';
-        } else if (todo.moveCount >= 3) {
-            textColor = '#E09090';
+            textColor = '#F0C880';
+        } else if (todo.moveCount === 3) {
+            textColor = '#F0B478';
+        } else if (todo.moveCount === 4) {
+            textColor = '#F0A074';
+        } else if (todo.moveCount >= 5) {
+            textColor = '#EE9090';
         }
 
         // Checkbox
