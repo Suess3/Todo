@@ -1,4 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" fill="#121212" rx="80"/>
-  <polyline points="120,256 210,346 392,164" fill="none" stroke="#4285F4" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect width="512" height="512" fill="#FFFFFF" rx="100"/>
+  <!-- Right leg (lighter blue) drawn first -->
+  <line x1="218" y1="375" x2="392" y2="152" stroke="#5BA2D9" stroke-width="76" stroke-linecap="round"/>
+  <!-- Left leg (darker blue) drawn on top so overlap is dark -->
+  <line x1="145" y1="305" x2="218" y2="375" stroke="#2B5CA8" stroke-width="76" stroke-linecap="round"/>
 </svg>
