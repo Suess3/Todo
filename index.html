@@ -13,11 +13,6 @@
 <body>
     <div id="auth-screen" class="hidden"></div>
     <div id="app" class="hidden">
-        <div class="app-header">
-            <span id="version-label" class="version-label"></span>
-            <button id="settings-btn" class="settings-btn">⚙︎</button>
-            <button id="signout-btn" class="signout-btn">Sign out</button>
-        </div>
 
         <div id="settings-modal" class="modal-overlay hidden">
             <div class="modal-card">
@@ -51,14 +46,31 @@
                     <span>Main color</span>
                     <input type="range" id="accent-slider" min="0" max="360" value="217" class="accent-slider">
                 </div>
+                <div class="setting-row">
+                    <span>Background photo</span>
+                    <div class="banner-btns">
+                        <button id="banner-choose-btn" class="modal-action-btn">Choose photo</button>
+                        <button id="banner-remove-btn" class="modal-action-btn muted">Remove</button>
+                    </div>
+                </div>
+                <input type="file" id="banner-file-input" accept="image/*" style="display:none">
             </div>
         </div>
-        <div id="page-tabs" class="page-tabs hidden">
-            <button class="page-tab active" data-page="todo">Todo</button>
-            <button class="page-tab" data-page="keepInMind">Notes</button>
-            <button class="page-tab" data-page="soon">Soon</button>
-            <button class="page-tab" data-page="longRun">Long run</button>
+
+        <div id="app-banner">
+            <div class="app-header">
+                <span id="version-label" class="version-label"></span>
+                <button id="settings-btn" class="settings-btn">⚙︎</button>
+                <button id="signout-btn" class="signout-btn">Sign out</button>
+            </div>
+            <div id="page-tabs" class="page-tabs hidden">
+                <button class="page-tab active" data-page="todo">Todo</button>
+                <button class="page-tab" data-page="keepInMind">Notes</button>
+                <button class="page-tab" data-page="soon">Soon</button>
+                <button class="page-tab" data-page="longRun">Long run</button>
+            </div>
         </div>
+
         <div id="app-content" class="app-container"></div>
     </div>
     <script type="module" src="src/app.js"></script>

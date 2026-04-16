@@ -2,6 +2,7 @@ const THEME_KEY = 'todo-theme';
 const REMINDER_KEY = 'todo-reminder';
 const URGENCY_KEY = 'todo-urgency-intensity';
 const ACCENT_KEY = 'todo-accent-hue';
+const BANNER_KEY = 'todo-banner-photo';
 
 export function getUrgencyIntensity() {
     return parseInt(localStorage.getItem(URGENCY_KEY) ?? '50');
@@ -10,6 +11,19 @@ export function getUrgencyIntensity() {
 export function applyAccent() {
     const hue = parseInt(localStorage.getItem(ACCENT_KEY) ?? '217');
     document.documentElement.style.setProperty('--accent', `hsl(${hue}, 80%, 60%)`);
+}
+
+export function applyBannerPhoto() {
+    const banner = document.getElementById('app-banner');
+    if (!banner) return;
+    const data = localStorage.getItem(BANNER_KEY);
+    if (data) {
+        banner.style.backgroundImage = `url(${data})`;
+        banner.classList.add('has-banner');
+    } else {
+        banner.style.backgroundImage = '';
+        banner.classList.remove('has-banner');
+    }
 }
 
 let reminderTimer = null;
@@ -127,5 +141,42 @@ export function initSettings() {
     accentSlider.addEventListener('input', () => {
         localStorage.setItem(ACCENT_KEY, accentSlider.value);
         applyAccent();
+    });
+
+    // Banner photo
+    const chooseBtn = document.getElementById('banner-choose-btn');
+    const removeBtn = document.getElementById('banner-remove-btn');
+    const fileInput = document.getElementById('banner-file-input');
+
+    chooseBtn.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const scale = Math.min(1, 1200 / img.width);
+                canvas.width = Math.round(img.width * scale);
+                canvas.height = Math.round(img.height * scale);
+                canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+                try {
+                    localStorage.setItem(BANNER_KEY, canvas.toDataURL('image/jpeg', 0.8));
+                    applyBannerPhoto();
+                } catch (e) {
+                    alert('Image too large to store. Please choose a smaller image.');
+                }
+            };
+            img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+        fileInput.value = '';
+    });
+
+    removeBtn.addEventListener('click', () => {
+        localStorage.removeItem(BANNER_KEY);
+        applyBannerPhoto();
     });
 }
