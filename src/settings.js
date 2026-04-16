@@ -1,5 +1,10 @@
 const THEME_KEY = 'todo-theme';
 const REMINDER_KEY = 'todo-reminder';
+const URGENCY_KEY = 'todo-urgency-intensity';
+
+export function getUrgencyIntensity() {
+    return parseInt(localStorage.getItem(URGENCY_KEY) ?? '50');
+}
 
 let reminderTimer = null;
 
@@ -100,5 +105,13 @@ export function initSettings() {
         const time = reminderTimeInput.value;
         localStorage.setItem(REMINDER_KEY, JSON.stringify({ enabled: true, time }));
         scheduleReminder(time);
+    });
+
+    // Urgency slider
+    const urgencySlider = document.getElementById('urgency-slider');
+    urgencySlider.value = getUrgencyIntensity();
+    urgencySlider.addEventListener('input', () => {
+        localStorage.setItem(URGENCY_KEY, urgencySlider.value);
+        document.dispatchEvent(new CustomEvent('urgency-changed'));
     });
 }

@@ -1,5 +1,6 @@
 import { auth } from './firebase.js';
 import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, deleteTodo } from './todoService.js';
+import { getUrgencyIntensity } from './settings.js';
 
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -12,6 +13,31 @@ let currentPage = 'todo';
 let isAnimating = false;
 
 const ANIM_KEY = 'todo-animated-day';
+
+const PASTEL_COLORS = ['#F0DC8A', '#F0C880', '#F0B478', '#F0A074', '#EE9090'];
+const VIVID_COLORS  = ['#E8C420', '#E89028', '#E06828', '#D44A28', '#C83232'];
+
+function lerpColor(hex1, hex2, t) {
+    const p = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+    const [r1,g1,b1] = p(hex1);
+    const [r2,g2,b2] = p(hex2);
+    return `rgb(${Math.round(r1+(r2-r1)*t)},${Math.round(g1+(g2-g1)*t)},${Math.round(b1+(b2-b1)*t)})`;
+}
+
+function urgencyColor(moveCount) {
+    const intensity = getUrgencyIntensity();
+    if (intensity === 0) return 'var(--text)';
+    const idx = Math.min(moveCount - 1, 4);
+    const isDark = document.body.getAttribute('data-theme') !== 'light';
+    const neutral = isDark ? '#FFFFFF' : '#121212';
+    if (intensity <= 50) {
+        return lerpColor(neutral, PASTEL_COLORS[idx], intensity / 50);
+    } else {
+        return lerpColor(PASTEL_COLORS[idx], VIVID_COLORS[idx], (intensity - 50) / 50);
+    }
+}
+
+document.addEventListener('urgency-changed', () => renderApp(currentTodos));
 
 function shouldAnimate(todayEpoch) {
     const last = parseInt(localStorage.getItem(ANIM_KEY) || '0');
@@ -161,16 +187,8 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         let textColor = 'var(--text)';
         if (todo.isDone || isPast) {
             textColor = 'var(--text-muted)';
-        } else if (todo.moveCount === 1) {
-            textColor = '#F0DC8A';
-        } else if (todo.moveCount === 2) {
-            textColor = '#F0C880';
-        } else if (todo.moveCount === 3) {
-            textColor = '#F0B478';
-        } else if (todo.moveCount === 4) {
-            textColor = '#F0A074';
-        } else if (todo.moveCount >= 5) {
-            textColor = '#EE9090';
+        } else if (todo.moveCount >= 1) {
+            textColor = urgencyColor(todo.moveCount);
         }
 
         // Checkbox
