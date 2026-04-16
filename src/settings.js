@@ -4,10 +4,11 @@ const ACCENT_KEY = 'todo-accent-hue';
 const BANNER_KEY = 'todo-banner-photo';
 const BADGE_KEY = 'todo-badge-enabled';
 
+const BANNER_POS_KEY = 'todo-banner-pos';
+
 export function isBadgeEnabled() {
     return localStorage.getItem(BADGE_KEY) === 'true';
 }
-const BANNER_POS_KEY = 'todo-banner-pos';
 
 export function getUrgencyIntensity() {
     return parseInt(localStorage.getItem(URGENCY_KEY) ?? '50');

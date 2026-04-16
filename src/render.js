@@ -5,7 +5,7 @@ import { getUrgencyIntensity, isBadgeEnabled } from './settings.js';
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const expandedStates = {};
-const dirtyIds = new Set(); // todo IDs with unsaved text changes
+const dirtyIds = new Set();
 
 let currentTodos = [];
 let focusTarget = null; // { id, cursor } to restore after render
@@ -16,6 +16,7 @@ const ANIM_KEY = 'todo-animated-day';
 
 const PASTEL_COLORS = ['#F0DC8A', '#F0C880', '#F0B478', '#F0A074', '#EE9090'];
 const VIVID_COLORS  = ['#E8C420', '#E89028', '#E06828', '#D44A28', '#C83232'];
+const SOON_COLORS   = ['#E8D99A', '#E0B98A', '#E09090']; // 1 week, 2 weeks, 3+ weeks
 
 function lerpColor(hex1, hex2, t) {
     const p = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
@@ -24,8 +25,7 @@ function lerpColor(hex1, hex2, t) {
     return `rgb(${Math.round(r1+(r2-r1)*t)},${Math.round(g1+(g2-g1)*t)},${Math.round(b1+(b2-b1)*t)})`;
 }
 
-function urgencyColor(moveCount) {
-    const intensity = getUrgencyIntensity();
+function urgencyColor(moveCount, intensity) {
     if (intensity === 0) return 'var(--text)';
     const idx = Math.min(moveCount - 1, 4);
     const isDark = document.body.getAttribute('data-theme') !== 'light';
@@ -62,12 +62,36 @@ async function typeInputs(inputs) {
     isAnimating = false;
 }
 
+// --- Shared helpers ---
+
+function createCheckbox(todo, uid, todayUnchecked = false) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'checkbox-wrapper';
+    const box = document.createElement('div');
+    box.className = ['checkbox', todo.isDone ? 'checked' : '', todayUnchecked ? 'today-unchecked' : ''].filter(Boolean).join(' ');
+    box.textContent = todo.isDone ? '✓' : '';
+    wrapper.appendChild(box);
+    wrapper.addEventListener('click', () => toggleTodo(uid, todo.id, !todo.isDone));
+    return wrapper;
+}
+
+function attachBlurSave(input, todoId) {
+    input.addEventListener('blur', () => {
+        const uid = auth.currentUser?.uid;
+        if (!uid || !dirtyIds.has(todoId)) return;
+        dirtyIds.delete(todoId);
+        const todo = currentTodos.find(t => t.id === todoId);
+        if (todo) updateTodoText(uid, todoId, todo.text);
+    });
+}
+
+// ---
+
 export function setPage(page) {
     currentPage = page;
     renderApp(currentTodos);
 }
 
-// Save all dirty todos to Firestore
 export async function flushDirty() {
     const uid = auth.currentUser?.uid;
     if (!uid || dirtyIds.size === 0) return;
@@ -124,10 +148,8 @@ export function renderApp(todos) {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
-    // Don't re-render while typing animation is running
     if (isAnimating) return;
 
-    // Save focused input state before wiping the DOM
     const active = document.activeElement;
     const savedFocus = (active && active.dataset.id) ? {
         id: active.dataset.id,
@@ -144,7 +166,6 @@ export function renderApp(todos) {
             renderDaySection(container, today + i, today, todos, uid);
         }
 
-        // Typing animation on first load of the day
         if (shouldAnimate(today)) {
             markAnimated(today);
             const todaySection = [...container.querySelectorAll('.day-section')][1]; // index 1 = today (index 0 = yesterday)
@@ -158,7 +179,6 @@ export function renderApp(todos) {
         renderFlatSection(container, todos, uid);
     }
 
-    // Restore focus
     if (focusTarget) {
         const el = container.querySelector(`[data-id="${focusTarget.id}"]`);
         if (el) { el.focus(); el.setSelectionRange(focusTarget.cursor, focusTarget.cursor); }
@@ -182,7 +202,6 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
     const section = document.createElement('div');
     section.className = 'day-section';
 
-    // Header
     const header = document.createElement('div');
     header.className = 'day-header';
     header.innerHTML = `
@@ -196,9 +215,10 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
     });
     section.appendChild(header);
 
-    // List
     const list = document.createElement('div');
     list.className = `todo-list${isOpen ? '' : ' hidden'}`;
+
+    const urgencyIntensity = getUrgencyIntensity(); // cache once per day section render
 
     dayTodos.forEach(todo => {
         const row = document.createElement('div');
@@ -208,19 +228,11 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         if (todo.isDone || isPast) {
             textColor = 'var(--text-muted)';
         } else if (todo.moveCount >= 1) {
-            textColor = urgencyColor(todo.moveCount);
+            textColor = urgencyColor(todo.moveCount, urgencyIntensity);
         }
 
-        // Checkbox
-        const checkWrapper = document.createElement('div');
-        checkWrapper.className = 'checkbox-wrapper';
-        const checkbox = document.createElement('div');
-        checkbox.className = ['checkbox', todo.isDone ? 'checked' : '', isToday && !todo.isDone ? 'today-unchecked' : ''].join(' ').trim();
-        checkbox.textContent = todo.isDone ? '✓' : '';
-        checkWrapper.appendChild(checkbox);
-        checkWrapper.addEventListener('click', () => toggleTodo(uid, todo.id, !todo.isDone));
+        row.appendChild(createCheckbox(todo, uid, isToday && !todo.isDone));
 
-        // Input
         const input = document.createElement('input');
         input.type = 'text';
         input.dataset.id = todo.id;
@@ -228,27 +240,19 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         input.value = todo.text;
         input.style.color = textColor;
 
-        // Typing: update local state only, mark dirty for periodic save
         input.addEventListener('input', () => {
             const idx = currentTodos.findIndex(t => t.id === todo.id);
             currentTodos[idx] = { ...currentTodos[idx], text: input.value };
             dirtyIds.add(todo.id);
         });
 
-        // Bug 6: save on blur so changes aren't lost when clicking away
-        input.addEventListener('blur', () => {
-            const uid2 = auth.currentUser?.uid;
-            if (!uid2 || !dirtyIds.has(todo.id)) return;
-            dirtyIds.delete(todo.id);
-            const current = currentTodos.find(t => t.id === todo.id);
-            if (current) updateTodoText(uid2, todo.id, current.text);
-        });
+        attachBlurSave(input, todo.id);
 
-        let enterInFlight = false; // Bug 1: guard against double Enter
+        let enterInFlight = false;
         input.addEventListener('keydown', async (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                if (enterInFlight) return; // Bug 1: ignore rapid second press
+                if (enterInFlight) return;
                 enterInFlight = true;
 
                 const cursor = input.selectionStart;
@@ -256,10 +260,7 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 const after = input.value.slice(cursor);
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
 
-                // Bug 2: insert new todo right after current, not at the end
-                const next = currentTodos.find(
-                    (t, i) => i > idx && t.dateEpochDay === dateEpoch
-                );
+                const next = currentTodos.find((t, i) => i > idx && t.dateEpochDay === dateEpoch);
                 const currentOrder = currentTodos[idx].sortOrder;
                 const nextOrder = next ? next.sortOrder : currentOrder + 2000;
                 const newSortOrder = (currentOrder + nextOrder) / 2;
@@ -267,7 +268,7 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 currentTodos[idx] = { ...currentTodos[idx], text: before };
                 dirtyIds.add(todo.id);
 
-                // Bug 4: set focusTarget and render locally before the async write
+                // render locally before async write so focus doesn't jump
                 const tempId = '_pending_' + Date.now();
                 const tempTodo = {
                     id: tempId,
@@ -287,7 +288,6 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
 
                 const newDoc = await addTodo(uid, dateEpoch, after, newSortOrder);
 
-                // Replace temp entry with real Firestore id
                 currentTodos = currentTodos.map(t =>
                     t.id === tempId ? { ...t, id: newDoc.id } : t
                 );
@@ -297,30 +297,26 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 enterInFlight = false;
             }
 
-            // Bug 3: Backspace at start of non-empty line — merge with previous line
             if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
                 e.preventDefault();
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
                 const prev = currentTodos.slice(0, idx).reverse().find(t => t.dateEpochDay === dateEpoch);
                 if (!prev && input.value === '') {
-                    // Empty first line of day — just delete it
                     currentTodos = currentTodos.filter(t => t.id !== todo.id);
                     dirtyIds.delete(todo.id);
                     renderApp(currentTodos);
                     deleteTodo(uid, todo.id);
                     return;
                 }
-                if (!prev) return; // nothing above on this day
+                if (!prev) return;
 
                 if (input.value === '') {
-                    // Empty line: delete and move focus up
                     focusTarget = { id: prev.id, cursor: prev.text.length };
                     currentTodos = currentTodos.filter(t => t.id !== todo.id);
                     dirtyIds.delete(todo.id);
                     renderApp(currentTodos);
                     deleteTodo(uid, todo.id);
                 } else {
-                    // Non-empty line: merge text onto previous line
                     const mergedText = prev.text + input.value;
                     const splitCursor = prev.text.length;
                     const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
@@ -334,7 +330,7 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
                 }
             }
 
-            // Bug 5: arrow keys — move focus directly, no re-render needed
+            // move focus directly without re-render
             if (e.key === 'ArrowUp' && input.selectionStart === 0) {
                 e.preventDefault();
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
@@ -356,12 +352,10 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
             }
         });
 
-        row.appendChild(checkWrapper);
         row.appendChild(input);
         list.appendChild(row);
     });
 
-    // Tap to add
     if (isOpen) {
         const addBtn = document.createElement('div');
         addBtn.className = 'tap-to-add';
@@ -376,6 +370,7 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
 
 function renderFlatSection(container, allTodos, uid) {
     const pageTodos = allTodos.filter(t => t.page === currentPage);
+    const siblings = pageTodos; // stable reference for keyboard navigation
 
     const list = document.createElement('div');
     list.className = 'todo-list flat-list';
@@ -384,13 +379,7 @@ function renderFlatSection(container, allTodos, uid) {
         const row = document.createElement('div');
         row.className = `todo-row${todo.isDone ? ' done' : ''}`;
 
-        const checkWrapper = document.createElement('div');
-        checkWrapper.className = 'checkbox-wrapper';
-        const checkbox = document.createElement('div');
-        checkbox.className = ['checkbox', todo.isDone ? 'checked' : ''].join(' ').trim();
-        checkbox.textContent = todo.isDone ? '✓' : '';
-        checkWrapper.appendChild(checkbox);
-        checkWrapper.addEventListener('click', () => toggleTodo(uid, todo.id, !todo.isDone));
+        row.appendChild(createCheckbox(todo, uid));
 
         const input = document.createElement('textarea');
         input.dataset.id = todo.id;
@@ -400,16 +389,11 @@ function renderFlatSection(container, allTodos, uid) {
 
         if (currentPage === 'soon' && !todo.isDone && todo.createdAt) {
             const ageWeeks = (Date.now() - todo.createdAt) / (7 * 24 * 60 * 60 * 1000);
-            if (ageWeeks >= 3) {
-                input.style.color = '#E09090';
-            } else if (ageWeeks >= 2) {
-                input.style.color = '#E0B98A';
-            } else if (ageWeeks >= 1) {
-                input.style.color = '#E8D99A';
-            }
+            if (ageWeeks >= 3)      input.style.color = SOON_COLORS[2];
+            else if (ageWeeks >= 2) input.style.color = SOON_COLORS[1];
+            else if (ageWeeks >= 1) input.style.color = SOON_COLORS[0];
         }
 
-        // Auto-grow height
         const autoGrow = () => {
             input.style.height = 'auto';
             input.style.height = input.scrollHeight + 'px';
@@ -422,18 +406,9 @@ function renderFlatSection(container, allTodos, uid) {
             autoGrow();
         });
 
-        input.addEventListener('blur', () => {
-            const uid2 = auth.currentUser?.uid;
-            if (!uid2 || !dirtyIds.has(todo.id)) return;
-            dirtyIds.delete(todo.id);
-            const current = currentTodos.find(t => t.id === todo.id);
-            if (current) updateTodoText(uid2, todo.id, current.text);
-        });
+        attachBlurSave(input, todo.id);
 
-        // Set initial height after render
         requestAnimationFrame(autoGrow);
-
-        const siblings = () => currentTodos.filter(t => t.page === currentPage);
 
         let enterInFlight = false;
         input.addEventListener('keydown', async (e) => {
@@ -446,9 +421,8 @@ function renderFlatSection(container, allTodos, uid) {
                 const before = input.value.slice(0, cursor);
                 const after = input.value.slice(cursor);
                 const idx = currentTodos.findIndex(t => t.id === todo.id);
-                const sibs = siblings();
-                const sibIdx = sibs.findIndex(t => t.id === todo.id);
-                const nextSib = sibs[sibIdx + 1];
+                const sibIdx = siblings.findIndex(t => t.id === todo.id);
+                const nextSib = siblings[sibIdx + 1];
                 const currentOrder = currentTodos[idx].sortOrder;
                 const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
                 const newSortOrder = (currentOrder + nextOrder) / 2;
@@ -478,9 +452,8 @@ function renderFlatSection(container, allTodos, uid) {
 
             if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
                 e.preventDefault();
-                const sibs = siblings();
-                const sibIdx = sibs.findIndex(t => t.id === todo.id);
-                const prev = sibs[sibIdx - 1];
+                const sibIdx = siblings.findIndex(t => t.id === todo.id);
+                const prev = siblings[sibIdx - 1];
 
                 if (!prev && input.value === '') {
                     currentTodos = currentTodos.filter(t => t.id !== todo.id);
@@ -513,8 +486,7 @@ function renderFlatSection(container, allTodos, uid) {
 
             if (e.key === 'ArrowUp' && input.selectionStart === 0) {
                 e.preventDefault();
-                const sibs = siblings();
-                const prev = sibs[sibs.findIndex(t => t.id === todo.id) - 1];
+                const prev = siblings[siblings.findIndex(t => t.id === todo.id) - 1];
                 if (prev) {
                     const el = document.querySelector(`[data-id="${prev.id}"]`);
                     if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
@@ -523,8 +495,7 @@ function renderFlatSection(container, allTodos, uid) {
 
             if (e.key === 'ArrowDown' && input.selectionStart === input.value.length) {
                 e.preventDefault();
-                const sibs = siblings();
-                const next = sibs[sibs.findIndex(t => t.id === todo.id) + 1];
+                const next = siblings[siblings.findIndex(t => t.id === todo.id) + 1];
                 if (next) {
                     const el = document.querySelector(`[data-id="${next.id}"]`);
                     if (el) { el.focus(); el.setSelectionRange(0, 0); }
@@ -532,7 +503,6 @@ function renderFlatSection(container, allTodos, uid) {
             }
         });
 
-        row.appendChild(checkWrapper);
         row.appendChild(input);
         list.appendChild(row);
     });
