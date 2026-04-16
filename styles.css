@@ -156,6 +156,13 @@ body {
     border-bottom-color: transparent;
 }
 
+#app-banner.has-banner {
+    cursor: grab;
+}
+#app-banner.has-banner:active {
+    cursor: grabbing;
+}
+
 .app-header {
     width: 100%;
     max-width: 600px;
