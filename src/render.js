@@ -79,6 +79,19 @@ export async function flushDirty() {
     }
 }
 
+function updateBadge(todos) {
+    if (!('setAppBadge' in navigator)) return;
+    const today = getTodayEpoch();
+    const count = todos.filter(t =>
+        !t.isDone && (!t.page || t.page === 'todo') && t.dateEpochDay <= today
+    ).length;
+    if (count > 0) {
+        navigator.setAppBadge(count);
+    } else {
+        navigator.clearAppBadge();
+    }
+}
+
 export function scheduleRender(todos) {
     // Preserve any unsaved local text edits — don't let Firestore overwrite them
     currentTodos = todos.map(t => {
@@ -88,6 +101,7 @@ export function scheduleRender(todos) {
         }
         return t;
     });
+    updateBadge(currentTodos);
     renderApp(currentTodos);
 }
 
