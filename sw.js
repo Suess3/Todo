@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todo-v17';
+const CACHE_NAME = 'todo-v18';
 
 const PRECACHE = [
     './',
@@ -8,7 +8,9 @@ const PRECACHE = [
     './src/firebase.js',
     './src/auth.js',
     './src/render.js',
+    './src/settings.js',
     './src/todoService.js',
+    './src/version.js',
     'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js',
     'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js',
     'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js',
