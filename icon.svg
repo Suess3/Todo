@@ -4,5 +4,5 @@
   <rect x="0" y="205" width="512" height="102" fill="#E06A28"/>
   <rect x="0" y="307" width="512" height="102" fill="#E89028"/>
   <rect x="0" y="409" width="512" height="103" fill="#F0BE28"/>
-  <polyline points="108,264 208,364 400,158" fill="none" stroke="white" stroke-width="74" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="80,270 200,390 435,130" fill="none" stroke="white" stroke-width="82" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
