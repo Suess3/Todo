@@ -3,6 +3,11 @@ const REMINDER_KEY = 'todo-reminder';
 const URGENCY_KEY = 'todo-urgency-intensity';
 const ACCENT_KEY = 'todo-accent-hue';
 const BANNER_KEY = 'todo-banner-photo';
+const BADGE_KEY = 'todo-badge-enabled';
+
+export function isBadgeEnabled() {
+    return localStorage.getItem(BADGE_KEY) === 'true';
+}
 const BANNER_POS_KEY = 'todo-banner-pos';
 
 export function getUrgencyIntensity() {
@@ -182,6 +187,26 @@ export function initSettings() {
         const time = reminderTimeInput.value;
         localStorage.setItem(REMINDER_KEY, JSON.stringify({ enabled: true, time }));
         scheduleReminder(time);
+    });
+
+    // Badge toggle
+    const badgeToggle = document.getElementById('badge-toggle');
+    badgeToggle.checked = isBadgeEnabled();
+    badgeToggle.addEventListener('change', async () => {
+        if (badgeToggle.checked) {
+            if (Notification.permission !== 'granted') {
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    badgeToggle.checked = false;
+                    return;
+                }
+            }
+            localStorage.setItem(BADGE_KEY, 'true');
+        } else {
+            localStorage.setItem(BADGE_KEY, 'false');
+            if ('clearAppBadge' in navigator) navigator.clearAppBadge();
+        }
+        document.dispatchEvent(new CustomEvent('badge-changed'));
     });
 
     // Urgency slider

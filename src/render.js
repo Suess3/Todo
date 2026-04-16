@@ -1,6 +1,6 @@
 import { auth } from './firebase.js';
 import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, deleteTodo } from './todoService.js';
-import { getUrgencyIntensity } from './settings.js';
+import { getUrgencyIntensity, isBadgeEnabled } from './settings.js';
 
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -81,9 +81,13 @@ export async function flushDirty() {
 
 function updateBadge(todos) {
     if (!('setAppBadge' in navigator)) return;
+    if (!isBadgeEnabled()) {
+        navigator.clearAppBadge();
+        return;
+    }
     const today = getTodayEpoch();
     const count = todos.filter(t =>
-        !t.isDone && (!t.page || t.page === 'todo') && t.dateEpochDay <= today
+        !t.isDone && (!t.page || t.page === 'todo') && t.dateEpochDay === today
     ).length;
     if (count > 0) {
         navigator.setAppBadge(count);
@@ -91,6 +95,8 @@ function updateBadge(todos) {
         navigator.clearAppBadge();
     }
 }
+
+document.addEventListener('badge-changed', () => updateBadge(currentTodos));
 
 export function scheduleRender(todos) {
     // Preserve any unsaved local text edits — don't let Firestore overwrite them
