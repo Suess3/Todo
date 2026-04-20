@@ -1,6 +1,7 @@
 const THEME_KEY = 'todo-theme';
 const URGENCY_KEY = 'todo-urgency-intensity';
 const ACCENT_KEY = 'todo-accent-hue';
+const BG_BRIGHTNESS_KEY = 'todo-bg-brightness';
 const BANNER_KEY = 'todo-banner-photo';
 const BADGE_KEY = 'todo-badge-enabled';
 
@@ -17,6 +18,26 @@ export function getUrgencyIntensity() {
 export function applyAccent() {
     const hue = parseInt(localStorage.getItem(ACCENT_KEY) ?? '217');
     document.documentElement.style.setProperty('--accent', `hsl(${hue}, 80%, 60%)`);
+}
+
+export function applyBgBrightness() {
+    const theme = localStorage.getItem(THEME_KEY) || 'dark';
+    if (theme === 'light') {
+        document.documentElement.style.removeProperty('--bg');
+        document.documentElement.style.removeProperty('--input-bg');
+        document.documentElement.style.removeProperty('--modal-bg');
+        return;
+    }
+    const value = parseInt(localStorage.getItem(BG_BRIGHTNESS_KEY) ?? '0');
+    // 0 → #121212 (18), 100 → #666666 (102)
+    const bg = Math.round(18 + (value / 100) * 84);
+    const surface = Math.round(30 + (value / 100) * 72); // #1e1e1e (30) → #666 (102)
+    const hex = v => v.toString(16).padStart(2, '0');
+    const bgHex = `#${hex(bg)}${hex(bg)}${hex(bg)}`;
+    const surfaceHex = `#${hex(surface)}${hex(surface)}${hex(surface)}`;
+    document.documentElement.style.setProperty('--bg', bgHex);
+    document.documentElement.style.setProperty('--input-bg', surfaceHex);
+    document.documentElement.style.setProperty('--modal-bg', surfaceHex);
 }
 
 function getBannerPos() {
@@ -98,6 +119,7 @@ export function applyTheme() {
 function setTheme(theme) {
     localStorage.setItem(THEME_KEY, theme);
     document.body.setAttribute('data-theme', theme);
+    applyBgBrightness();
 }
 
 // --- Settings Modal ---
@@ -158,6 +180,14 @@ export function initSettings() {
     accentSlider.addEventListener('input', () => {
         localStorage.setItem(ACCENT_KEY, accentSlider.value);
         applyAccent();
+    });
+
+    // Background brightness slider
+    const bgSlider = document.getElementById('bg-slider');
+    bgSlider.value = parseInt(localStorage.getItem(BG_BRIGHTNESS_KEY) ?? '0');
+    bgSlider.addEventListener('input', () => {
+        localStorage.setItem(BG_BRIGHTNESS_KEY, bgSlider.value);
+        applyBgBrightness();
     });
 
     // Banner photo
