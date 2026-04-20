@@ -125,6 +125,7 @@ document.addEventListener('badge-changed', () => updateBadge(currentTodos));
 
 export function scheduleRender(todos) {
     // Preserve any unsaved local text edits — don't let Firestore overwrite them
+    const pendingTodos = currentTodos.filter(t => t.id.startsWith('_pending_'));
     currentTodos = todos.map(t => {
         if (dirtyIds.has(t.id)) {
             const local = currentTodos.find(l => l.id === t.id);
@@ -133,6 +134,8 @@ export function scheduleRender(todos) {
         return t;
     });
     updateBadge(currentTodos);
+    // Skip re-render while an Enter is in flight — avoids losing the temp todo + focus
+    if (pendingTodos.length > 0) return;
     renderApp(currentTodos);
 }
 
@@ -241,6 +244,8 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         input.value = todo.text;
         input.style.color = textColor;
 
+        input.setAttribute('enterkeyhint', 'enter');
+
         input.addEventListener('input', () => {
             const idx = currentTodos.findIndex(t => t.id === todo.id);
             currentTodos[idx] = { ...currentTodos[idx], text: input.value };
@@ -250,55 +255,60 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         attachBlurSave(input, todo.id);
 
         let enterInFlight = false;
+        const onEnter = async (e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            if (enterInFlight) return;
+            enterInFlight = true;
+
+            const cursor = input.selectionStart;
+            const before = input.value.slice(0, cursor);
+            const after = input.value.slice(cursor);
+            const idx = currentTodos.findIndex(t => t.id === todo.id);
+
+            const next = currentTodos.find((t, i) => i > idx && t.dateEpochDay === dateEpoch);
+            const currentOrder = currentTodos[idx].sortOrder;
+            const nextOrder = next ? next.sortOrder : currentOrder + 2000;
+            const newSortOrder = (currentOrder + nextOrder) / 2;
+
+            currentTodos[idx] = { ...currentTodos[idx], text: before };
+            dirtyIds.add(todo.id);
+
+            // render locally before async write so focus doesn't jump
+            const tempId = '_pending_' + Date.now();
+            const tempTodo = {
+                id: tempId,
+                text: after,
+                isDone: false,
+                dateEpochDay: dateEpoch,
+                sortOrder: newSortOrder,
+                moveCount: 0,
+            };
+            currentTodos = [
+                ...currentTodos.slice(0, idx + 1),
+                tempTodo,
+                ...currentTodos.slice(idx + 1),
+            ];
+            focusTarget = { id: tempId, cursor: 0 };
+            renderApp(currentTodos);
+
+            const newDoc = await addTodo(uid, dateEpoch, after, newSortOrder);
+
+            // Update ID in place — avoid full re-render so keyboard stays open on mobile
+            currentTodos = currentTodos.map(t =>
+                t.id === tempId ? { ...t, id: newDoc.id } : t
+            );
+            if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
+            const tempEl = document.querySelector(`[data-id="${tempId}"]`);
+            if (tempEl) tempEl.dataset.id = newDoc.id;
+
+            enterInFlight = false;
+        };
+
+        // keypress is a fallback for Android keyboards that don't fire keydown on text inputs
+        input.addEventListener('keypress', onEnter);
         input.addEventListener('keydown', async (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                if (enterInFlight) return;
-                enterInFlight = true;
-
-                const cursor = input.selectionStart;
-                const before = input.value.slice(0, cursor);
-                const after = input.value.slice(cursor);
-                const idx = currentTodos.findIndex(t => t.id === todo.id);
-
-                const next = currentTodos.find((t, i) => i > idx && t.dateEpochDay === dateEpoch);
-                const currentOrder = currentTodos[idx].sortOrder;
-                const nextOrder = next ? next.sortOrder : currentOrder + 2000;
-                const newSortOrder = (currentOrder + nextOrder) / 2;
-
-                currentTodos[idx] = { ...currentTodos[idx], text: before };
-                dirtyIds.add(todo.id);
-
-                // render locally before async write so focus doesn't jump
-                const tempId = '_pending_' + Date.now();
-                const tempTodo = {
-                    id: tempId,
-                    text: after,
-                    isDone: false,
-                    dateEpochDay: dateEpoch,
-                    sortOrder: newSortOrder,
-                    moveCount: 0,
-                };
-                currentTodos = [
-                    ...currentTodos.slice(0, idx + 1),
-                    tempTodo,
-                    ...currentTodos.slice(idx + 1),
-                ];
-                focusTarget = { id: tempId, cursor: 0 };
-                renderApp(currentTodos);
-
-                const newDoc = await addTodo(uid, dateEpoch, after, newSortOrder);
-
-                // Update ID in place — avoid full re-render so keyboard stays open on mobile
-                currentTodos = currentTodos.map(t =>
-                    t.id === tempId ? { ...t, id: newDoc.id } : t
-                );
-                if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
-                const tempEl = document.querySelector(`[data-id="${tempId}"]`);
-                if (tempEl) tempEl.dataset.id = newDoc.id;
-
-                enterInFlight = false;
-            }
+            if (e.key === 'Enter') { await onEnter(e); return; }
 
             if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
                 e.preventDefault();
