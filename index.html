@@ -12,6 +12,7 @@
 </head>
 <body>
     <div id="auth-screen" class="hidden"></div>
+    <div id="bg-pattern-overlay"></div>
     <div id="app" class="hidden">
 
         <div id="settings-modal" class="modal-overlay hidden">
@@ -45,6 +46,21 @@
                 <div class="setting-row">
                     <span>Background shade</span>
                     <input type="range" id="bg-slider" min="0" max="100" value="0" class="urgency-slider">
+                </div>
+                <div class="setting-row setting-col">
+                    <span>Background pattern</span>
+                    <div class="pattern-picker" id="pattern-picker">
+                        <button class="pattern-btn active" data-pattern="none">None</button>
+                        <button class="pattern-btn" data-pattern="grain">Grain</button>
+                        <button class="pattern-btn" data-pattern="dots">Dots</button>
+                        <button class="pattern-btn" data-pattern="grid">Grid</button>
+                        <button class="pattern-btn" data-pattern="diagonal">Lines</button>
+                        <button class="pattern-btn" data-pattern="scan">Scan</button>
+                    </div>
+                </div>
+                <div class="setting-row" id="pattern-opacity-row">
+                    <span>Pattern strength</span>
+                    <input type="range" id="pattern-slider" min="0" max="100" value="30" class="urgency-slider">
                 </div>
                 <div class="setting-row">
                     <span>Background photo</span>

@@ -1,7 +1,7 @@
 import { initAuth, renderAuthScreen, signOutUser } from './auth.js';
 import { moveTodos, subscribeTodos, cleanupNotes } from './todoService.js';
 import { scheduleRender, flushDirty, setPage } from './render.js';
-import { applyTheme, applyAccent, applyBgBrightness, applyBannerPhoto, initBannerDrag, initSettings } from './settings.js';
+import { applyTheme, applyAccent, applyBgBrightness, applyPattern, applyBannerPhoto, initBannerDrag, initSettings } from './settings.js';
 import { VERSION } from './version.js';
 
 let unsubscribe = null;
@@ -11,6 +11,7 @@ let saveInterval = null;
 applyTheme();
 applyAccent();
 applyBgBrightness();
+applyPattern();
 applyBannerPhoto();
 initBannerDrag();
 document.getElementById('version-label').textContent = VERSION;

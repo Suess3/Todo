@@ -2,6 +2,8 @@ const THEME_KEY = 'todo-theme';
 const URGENCY_KEY = 'todo-urgency-intensity';
 const ACCENT_KEY = 'todo-accent-hue';
 const BG_BRIGHTNESS_KEY = 'todo-bg-brightness';
+const BG_PATTERN_KEY = 'todo-bg-pattern';
+const BG_PATTERN_OPACITY_KEY = 'todo-bg-pattern-opacity';
 const BANNER_KEY = 'todo-banner-photo';
 const BADGE_KEY = 'todo-badge-enabled';
 
@@ -18,6 +20,39 @@ export function getUrgencyIntensity() {
 export function applyAccent() {
     const hue = parseInt(localStorage.getItem(ACCENT_KEY) ?? '217');
     document.documentElement.style.setProperty('--accent', `hsl(${hue}, 80%, 60%)`);
+}
+
+const _noiseSvg = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/></filter><rect width='200' height='200' filter='url(#n)'/></svg>`;
+const PATTERNS = {
+    none: null,
+    grain: `url("data:image/svg+xml,${encodeURIComponent(_noiseSvg)}")`,
+    dots: `radial-gradient(circle, rgba(255,255,255,0.7) 1px, transparent 1px)`,
+    grid: `linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)`,
+    diagonal: `repeating-linear-gradient(45deg, transparent 0px, transparent 18px, rgba(255,255,255,0.6) 18px, rgba(255,255,255,0.6) 19px)`,
+    scan: `repeating-linear-gradient(0deg, transparent 0px, transparent 3px, rgba(255,255,255,0.4) 3px, rgba(255,255,255,0.4) 4px)`,
+};
+const PATTERN_SIZES = {
+    grain: '200px 200px',
+    dots: '20px 20px',
+    grid: '24px 24px',
+    diagonal: 'auto',
+    scan: 'auto',
+};
+
+export function applyPattern() {
+    const overlay = document.getElementById('bg-pattern-overlay');
+    if (!overlay) return;
+    const pattern = localStorage.getItem(BG_PATTERN_KEY) || 'none';
+    if (pattern === 'none') {
+        overlay.style.opacity = '0';
+        return;
+    }
+    // Map 0–100 → 0.01–0.08 (neurowissenschaftlich sinnvoller Bereich)
+    const value = parseInt(localStorage.getItem(BG_PATTERN_OPACITY_KEY) ?? '30');
+    const opacity = 0.01 + (value / 100) * 0.07;
+    overlay.style.backgroundImage = PATTERNS[pattern];
+    overlay.style.backgroundSize = PATTERN_SIZES[pattern] || 'auto';
+    overlay.style.opacity = opacity.toFixed(3);
 }
 
 export function applyBgBrightness() {
@@ -188,6 +223,31 @@ export function initSettings() {
     bgSlider.addEventListener('input', () => {
         localStorage.setItem(BG_BRIGHTNESS_KEY, bgSlider.value);
         applyBgBrightness();
+    });
+
+    // Pattern picker
+    const patternOpacityRow = document.getElementById('pattern-opacity-row');
+    const patternSlider = document.getElementById('pattern-slider');
+    const patternBtns = document.querySelectorAll('.pattern-btn');
+    const savedPattern = localStorage.getItem(BG_PATTERN_KEY) || 'none';
+    patternSlider.value = parseInt(localStorage.getItem(BG_PATTERN_OPACITY_KEY) ?? '30');
+    patternOpacityRow.classList.toggle('hidden', savedPattern === 'none');
+
+    patternBtns.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.pattern === savedPattern);
+        btn.addEventListener('click', () => {
+            patternBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const pattern = btn.dataset.pattern;
+            localStorage.setItem(BG_PATTERN_KEY, pattern);
+            patternOpacityRow.classList.toggle('hidden', pattern === 'none');
+            applyPattern();
+        });
+    });
+
+    patternSlider.addEventListener('input', () => {
+        localStorage.setItem(BG_PATTERN_OPACITY_KEY, patternSlider.value);
+        applyPattern();
     });
 
     // Banner photo
