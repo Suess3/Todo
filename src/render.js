@@ -88,6 +88,7 @@ function attachBlurSave(input, todoId) {
 // ---
 
 export function setPage(page) {
+    isAnimating = false;
     currentPage = page;
     renderApp(currentTodos);
 }
@@ -288,11 +289,13 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
 
                 const newDoc = await addTodo(uid, dateEpoch, after, newSortOrder);
 
+                // Update ID in place — avoid full re-render so keyboard stays open on mobile
                 currentTodos = currentTodos.map(t =>
                     t.id === tempId ? { ...t, id: newDoc.id } : t
                 );
-                focusTarget = { id: newDoc.id, cursor: 0 };
-                renderApp(currentTodos);
+                if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
+                const tempEl = document.querySelector(`[data-id="${tempId}"]`);
+                if (tempEl) tempEl.dataset.id = newDoc.id;
 
                 enterInFlight = false;
             }
@@ -444,9 +447,13 @@ function renderFlatSection(container, allTodos, uid) {
                 renderApp(currentTodos);
 
                 const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage);
+
+                // Update ID in place — avoid full re-render so keyboard stays open on mobile
                 currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-                focusTarget = { id: newDoc.id, cursor: 0 };
-                renderApp(currentTodos);
+                if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
+                const tempEl = document.querySelector(`[data-id="${tempId}"]`);
+                if (tempEl) tempEl.dataset.id = newDoc.id;
+
                 enterInFlight = false;
             }
 
