@@ -175,8 +175,14 @@ export function renderApp(todos) {
             const todaySection = [...container.querySelectorAll('.day-section')][1]; // index 1 = today (index 0 = yesterday)
             if (todaySection) {
                 const inputs = [...todaySection.querySelectorAll('.todo-input')].filter(el => el.value.trim() !== '');
+                // neue Todos zuerst, dann farbige (moveCount >= 1)
+                inputs.sort((a, b) => {
+                    const aMoved = (currentTodos.find(t => t.id === a.dataset.id)?.moveCount || 0) >= 1 ? 1 : 0;
+                    const bMoved = (currentTodos.find(t => t.id === b.dataset.id)?.moveCount || 0) >= 1 ? 1 : 0;
+                    return aMoved - bMoved;
+                });
                 inputs.forEach(el => { el.dataset.fullText = el.value; el.value = ''; });
-                typeInputs(inputs);
+                typeInputs(inputs).then(() => renderApp(currentTodos));
             }
         }
     } else {
