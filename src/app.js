@@ -48,13 +48,13 @@ initAuth(
         document.getElementById('signout-btn').onclick = signOutUser;
         initSettings();
 
+        try { await moveTodos(user.uid); } catch (e) { console.error('moveTodos:', e); }
+        try { await cleanupNotes(user.uid); } catch (e) { console.error('cleanupNotes:', e); }
+
         if (unsubscribe) unsubscribe();
         unsubscribe = subscribeTodos(user.uid, (todos) => {
             scheduleRender(todos);
         });
-
-        try { await moveTodos(user.uid); } catch (e) { console.error('moveTodos:', e); }
-        try { await cleanupNotes(user.uid); } catch (e) { console.error('cleanupNotes:', e); }
 
         if (saveInterval) clearInterval(saveInterval);
         saveInterval = setInterval(flushDirty, 60000);
