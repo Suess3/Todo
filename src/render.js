@@ -13,6 +13,7 @@ let currentPage = 'todo';
 let isAnimating = false;
 
 const ANIM_KEY = 'todo-animated-day';
+const saveTimers = new Map();
 
 const PASTEL_COLORS = ['#F0DC8A', '#F0C880', '#F0B478', '#F0A074', '#EE9090'];
 const VIVID_COLORS  = ['#E8C420', '#E89028', '#E06828', '#D44A28', '#C83232'];
@@ -75,13 +76,31 @@ function createCheckbox(todo, uid, todayUnchecked = false) {
     return wrapper;
 }
 
-function attachBlurSave(input, todoId) {
-    input.addEventListener('blur', () => {
+function scheduleSave(id, inputEl) {
+    clearTimeout(saveTimers.get(id));
+    saveTimers.set(id, setTimeout(() => {
+        saveTimers.delete(id);
+        const currentId = inputEl.dataset.id;
+        if (currentId.startsWith('_pending_')) return;
         const uid = auth.currentUser?.uid;
-        if (!uid || !dirtyIds.has(todoId)) return;
-        dirtyIds.delete(todoId);
-        const todo = currentTodos.find(t => t.id === todoId);
-        if (todo) updateTodoText(uid, todoId, todo.text);
+        if (!uid || !dirtyIds.has(currentId)) return;
+        dirtyIds.delete(currentId);
+        const todo = currentTodos.find(t => t.id === currentId);
+        if (todo) updateTodoText(uid, currentId, todo.text);
+    }, 2000));
+}
+
+function attachBlurSave(input) {
+    input.addEventListener('blur', () => {
+        const id = input.dataset.id;
+        clearTimeout(saveTimers.get(id));
+        saveTimers.delete(id);
+        if (id.startsWith('_pending_')) return;
+        const uid = auth.currentUser?.uid;
+        if (!uid || !dirtyIds.has(id)) return;
+        dirtyIds.delete(id);
+        const todo = currentTodos.find(t => t.id === id);
+        if (todo) updateTodoText(uid, id, todo.text);
     });
 }
 
@@ -99,6 +118,7 @@ export async function flushDirty() {
     const ids = [...dirtyIds];
     dirtyIds.clear();
     for (const id of ids) {
+        if (id.startsWith('_pending_')) continue;
         const todo = currentTodos.find(t => t.id === id);
         if (todo) await updateTodoText(uid, id, todo.text);
     }
@@ -253,12 +273,14 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         input.setAttribute('enterkeyhint', 'enter');
 
         input.addEventListener('input', () => {
-            const idx = currentTodos.findIndex(t => t.id === todo.id);
-            currentTodos[idx] = { ...currentTodos[idx], text: input.value };
-            dirtyIds.add(todo.id);
+            const id = input.dataset.id;
+            const idx = currentTodos.findIndex(t => t.id === id);
+            if (idx !== -1) currentTodos[idx] = { ...currentTodos[idx], text: input.value };
+            dirtyIds.add(id);
+            scheduleSave(id, input);
         });
 
-        attachBlurSave(input, todo.id);
+        attachBlurSave(input);
 
         let enterInFlight = false;
         const onEnter = async (e) => {
@@ -419,13 +441,15 @@ function renderFlatSection(container, allTodos, uid) {
         };
 
         input.addEventListener('input', () => {
-            const idx = currentTodos.findIndex(t => t.id === todo.id);
-            currentTodos[idx] = { ...currentTodos[idx], text: input.value };
-            dirtyIds.add(todo.id);
+            const id = input.dataset.id;
+            const idx = currentTodos.findIndex(t => t.id === id);
+            if (idx !== -1) currentTodos[idx] = { ...currentTodos[idx], text: input.value };
+            dirtyIds.add(id);
+            scheduleSave(id, input);
             autoGrow();
         });
 
-        attachBlurSave(input, todo.id);
+        attachBlurSave(input);
 
         requestAnimationFrame(autoGrow);
 
