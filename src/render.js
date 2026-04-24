@@ -1,5 +1,5 @@
 import { auth } from './firebase.js';
-import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, deleteTodo } from './todoService.js';
+import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, deleteTodo, recordProductivity } from './todoService.js';
 import { getUrgencyIntensity, isBadgeEnabled } from './settings.js';
 import { triggerCheckAnimation } from './animations.js';
 
@@ -80,7 +80,13 @@ function createCheckbox(uid, isDone, todayUnchecked = false) {
         const current = currentTodos.find(t => t.id === id);
         if (!current) return;
         const newState = !current.isDone;
-        if (newState) triggerCheckAnimation(wrapper); // only on check, not uncheck
+        if (newState) {
+            triggerCheckAnimation(wrapper);
+            // Only record productivity for the main todo page
+            if (!current.page || current.page === 'todo') {
+                recordProductivity(uid, current.moveCount || 0);
+            }
+        }
         toggleTodo(uid, id, newState);
     });
     return wrapper;

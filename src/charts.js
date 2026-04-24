@@ -1,9 +1,9 @@
 import { db, auth } from './firebase.js';
-import { collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-// Mirrors the urgency palette from render.js
-const CHART_COLORS = [
-    { label: 'Same day', light: '#CCCCCC', dark: '#555555' },
+// Mirrors the urgency palette from render.js; bucket 0 is light green (same day = success)
+const BUCKETS = [
+    { label: 'Same day', color: '#6ee7a0' },  // light green
     { label: 'Day 2',    color: '#F0DC8A' },
     { label: 'Day 3',    color: '#F0B478' },
     { label: 'Day 4',    color: '#E89028' },
@@ -24,6 +24,13 @@ export function initCharts() {
     modal.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
 }
 
+// Returns a local YYYY-MM-DD key for a date offset by `offsetDays` from today
+function dayKey(offsetDays = 0) {
+    const d = new Date();
+    d.setDate(d.getDate() - offsetDays);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 async function loadCharts() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
@@ -32,21 +39,22 @@ async function loadCharts() {
     document.getElementById('charts-content').classList.add('hidden');
 
     try {
-        const snapshot = await getDocs(
-            query(collection(db, 'users', uid, 'todos'), where('isDone', '==', true))
-        );
+        const snapshot = await getDocs(collection(db, 'users', uid, 'productivity'));
 
-        const done = [];
-        snapshot.forEach(d => done.push(d.data()));
+        // Build a map: { 'YYYY-MM-DD': { '0': n, '1': n, ... } }
+        const byDay = {};
+        snapshot.forEach(d => { byDay[d.id] = d.data(); });
 
-        // Only the main todo page (page field is 'todo' or absent on older entries)
-        const todosDone = done.filter(t => (!t.page || t.page === 'todo') && t.completedAt);
+        const weekKeys = new Set(Array.from({ length: 7 }, (_, i) => dayKey(i)));
 
-        const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        const weekly  = todosDone.filter(t => t.completedAt >= weekAgo);
+        const weekData    = aggregate(byDay, key => weekKeys.has(key));
+        const allTimeData = aggregate(byDay, () => true);
 
-        renderPie('week-chart',    weekly,    `This Week (${weekly.length})`);
-        renderPie('alltime-chart', todosDone, `All Time (${todosDone.length})`);
+        const weekTotal    = weekData.reduce((a, b) => a + b, 0);
+        const allTimeTotal = allTimeData.reduce((a, b) => a + b, 0);
+
+        renderPie('week-chart',    weekData,    `This Week (${weekTotal})`);
+        renderPie('alltime-chart', allTimeData, `All Time (${allTimeTotal})`);
     } catch (e) {
         console.error('charts:', e);
     }
@@ -55,37 +63,40 @@ async function loadCharts() {
     document.getElementById('charts-content').classList.remove('hidden');
 }
 
-function groupByMoveCount(todos) {
-    const counts = [0, 0, 0, 0, 0, 0]; // buckets: 0,1,2,3,4,5+
-    todos.forEach(t => { counts[Math.min(t.moveCount || 0, 5)]++; });
-    return counts;
+// Sum each bucket across all days matching the filter
+function aggregate(byDay, filter) {
+    const totals = [0, 0, 0, 0, 0, 0];
+    Object.entries(byDay).forEach(([key, day]) => {
+        if (!filter(key)) return;
+        for (let i = 0; i <= 5; i++) {
+            totals[i] += day[String(i)] || 0;
+        }
+    });
+    return totals;
 }
 
-function renderPie(canvasId, todos, title) {
-    const canvas = document.getElementById(canvasId);
-    const isDark  = document.body.getAttribute('data-theme') !== 'light';
+function renderPie(canvasId, counts, title) {
+    const canvas    = document.getElementById(canvasId);
+    const isDark    = document.body.getAttribute('data-theme') !== 'light';
     const textColor = isDark ? '#cccccc' : '#333333';
 
     // Destroy previous chart instance on re-open
     const existing = window.Chart?.getChart(canvas);
     if (existing) existing.destroy();
 
-    const counts = groupByMoveCount(todos);
-
-    // Only include buckets that have at least one todo
+    // Only include buckets that have data
     const labels = [], data = [], colors = [];
-    CHART_COLORS.forEach((c, i) => {
+    BUCKETS.forEach((b, i) => {
         if (counts[i] === 0) return;
-        labels.push(c.label);
+        labels.push(b.label);
         data.push(counts[i]);
-        colors.push(i === 0 ? (isDark ? c.dark : c.light) : c.color);
+        colors.push(b.color);
     });
 
     if (data.length === 0) {
-        // Nothing completed yet — show an empty placeholder slice
-        labels.push('No data');
+        labels.push('No data yet');
         data.push(1);
-        colors.push(isDark ? '#333333' : '#e0e0e0');
+        colors.push(isDark ? '#2a2a2a' : '#e0e0e0');
     }
 
     new window.Chart(canvas, {
@@ -123,7 +134,7 @@ function renderPie(canvasId, todos, title) {
                 tooltip: {
                     callbacks: {
                         label: ctx => {
-                            if (ctx.label === 'No data') return ' No completed todos yet';
+                            if (ctx.label === 'No data yet') return ' Check off your first todo!';
                             const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
                             const pct   = ((ctx.parsed / total) * 100).toFixed(1);
                             return ` ${ctx.parsed} todo${ctx.parsed !== 1 ? 's' : ''} (${pct}%)`;

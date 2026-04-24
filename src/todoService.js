@@ -1,7 +1,8 @@
 import { db } from './firebase.js';
 import {
     collection, addDoc, onSnapshot, query, orderBy,
-    updateDoc, doc, deleteDoc, where, getDocs, writeBatch
+    updateDoc, doc, deleteDoc, where, getDocs, writeBatch,
+    setDoc, increment
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 export function getTodayEpoch() {
@@ -84,4 +85,17 @@ export async function updateTodoText(uid, id, text) {
 
 export async function deleteTodo(uid, id) {
     return deleteDoc(doc(db, 'users', uid, 'todos', id));
+}
+
+function localDayKey() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// Records a todo completion into the daily productivity summary.
+// Uses Firestore increment so concurrent writes from multiple devices don't conflict.
+export async function recordProductivity(uid, moveCount) {
+    const bucket = String(Math.min(moveCount || 0, 5));
+    const ref = doc(db, 'users', uid, 'productivity', localDayKey());
+    await setDoc(ref, { [bucket]: increment(1) }, { merge: true });
 }
