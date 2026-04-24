@@ -295,6 +295,8 @@ body {
     padding: 4px;
     cursor: pointer;
     flex-shrink: 0;
+    touch-action: manipulation; /* eliminates 300ms tap delay on iOS */
+    -webkit-tap-highlight-color: transparent;
 }
 .checkbox {
     width: 18px;
