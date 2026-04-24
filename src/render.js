@@ -8,7 +8,7 @@ const expandedStates = {};
 const dirtyIds = new Set();
 
 let currentTodos = [];
-let focusTarget = null; // { id, cursor } to restore after render
+let focusTarget = null; // { id, cursor } — focus a specific input after next render
 let currentPage = 'todo';
 let isAnimating = false;
 
@@ -63,48 +63,66 @@ async function typeInputs(inputs) {
     isAnimating = false;
 }
 
-// --- Shared helpers ---
+// --- Checkbox ---
 
-function createCheckbox(todo, uid, todayUnchecked = false) {
+function createCheckbox(uid, isDone, todayUnchecked = false) {
     const wrapper = document.createElement('div');
     wrapper.className = 'checkbox-wrapper';
     const box = document.createElement('div');
-    box.className = ['checkbox', todo.isDone ? 'checked' : '', todayUnchecked ? 'today-unchecked' : ''].filter(Boolean).join(' ');
-    box.textContent = todo.isDone ? '✓' : '';
+    box.className = ['checkbox', isDone ? 'checked' : '', todayUnchecked ? 'today-unchecked' : ''].filter(Boolean).join(' ');
+    box.textContent = isDone ? '✓' : '';
     wrapper.appendChild(box);
-    wrapper.addEventListener('click', () => toggleTodo(uid, todo.id, !todo.isDone));
+    // Read id from the row at click time so it stays correct after temp→real id swap
+    wrapper.addEventListener('click', () => {
+        const id = wrapper.closest('.todo-row')?.dataset.id;
+        if (!id || id.startsWith('_pending_')) return;
+        const current = currentTodos.find(t => t.id === id);
+        if (current) toggleTodo(uid, id, !current.isDone);
+    });
     return wrapper;
 }
 
+function updateCheckbox(wrapper, isDone, todayUnchecked) {
+    const box = wrapper.querySelector('.checkbox');
+    box.className = ['checkbox', isDone ? 'checked' : '', todayUnchecked ? 'today-unchecked' : ''].filter(Boolean).join(' ');
+    box.textContent = isDone ? '✓' : '';
+}
+
+// --- Save logic ---
+
 function scheduleSave(id, inputEl) {
     clearTimeout(saveTimers.get(id));
-    saveTimers.set(id, setTimeout(() => {
+    saveTimers.set(id, setTimeout(async () => {
         saveTimers.delete(id);
         const currentId = inputEl.dataset.id;
         if (currentId.startsWith('_pending_')) return;
         const uid = auth.currentUser?.uid;
         if (!uid || !dirtyIds.has(currentId)) return;
-        dirtyIds.delete(currentId);
         const todo = currentTodos.find(t => t.id === currentId);
-        if (todo) updateTodoText(uid, currentId, todo.text);
+        if (!todo) return;
+        dirtyIds.delete(currentId);
+        try { await updateTodoText(uid, currentId, todo.text); }
+        catch { dirtyIds.add(currentId); }
     }, 2000));
 }
 
 function attachBlurSave(input) {
-    input.addEventListener('blur', () => {
+    input.addEventListener('blur', async () => {
         const id = input.dataset.id;
         clearTimeout(saveTimers.get(id));
         saveTimers.delete(id);
         if (id.startsWith('_pending_')) return;
         const uid = auth.currentUser?.uid;
         if (!uid || !dirtyIds.has(id)) return;
-        dirtyIds.delete(id);
         const todo = currentTodos.find(t => t.id === id);
-        if (todo) updateTodoText(uid, id, todo.text);
+        if (!todo) return;
+        dirtyIds.delete(id);
+        try { await updateTodoText(uid, id, todo.text); }
+        catch { dirtyIds.add(id); }
     });
 }
 
-// ---
+// --- Public API ---
 
 export function setPage(page) {
     isAnimating = false;
@@ -115,36 +133,30 @@ export function setPage(page) {
 export async function flushDirty() {
     const uid = auth.currentUser?.uid;
     if (!uid || dirtyIds.size === 0) return;
-    const ids = [...dirtyIds];
-    dirtyIds.clear();
-    for (const id of ids) {
-        if (id.startsWith('_pending_')) continue;
+    const ids = [...dirtyIds].filter(id => !id.startsWith('_pending_'));
+    await Promise.all(ids.map(async id => {
         const todo = currentTodos.find(t => t.id === id);
-        if (todo) await updateTodoText(uid, id, todo.text);
-    }
+        if (!todo) return;
+        dirtyIds.delete(id);
+        try { await updateTodoText(uid, id, todo.text); }
+        catch { dirtyIds.add(id); }
+    }));
 }
 
 function updateBadge(todos) {
     if (!('setAppBadge' in navigator)) return;
-    if (!isBadgeEnabled()) {
-        navigator.clearAppBadge();
-        return;
-    }
+    if (!isBadgeEnabled()) { navigator.clearAppBadge(); return; }
     const today = getTodayEpoch();
     const count = todos.filter(t =>
         !t.isDone && (!t.page || t.page === 'todo') && t.dateEpochDay === today
     ).length;
-    if (count > 0) {
-        navigator.setAppBadge(count);
-    } else {
-        navigator.clearAppBadge();
-    }
+    count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge();
 }
 
 document.addEventListener('badge-changed', () => updateBadge(currentTodos));
 
 export function scheduleRender(todos) {
-    // Preserve any unsaved local text edits — don't let Firestore overwrite them
+    // Preserve unsaved local edits — don't let Firestore overwrite in-flight text
     const pendingTodos = currentTodos.filter(t => t.id.startsWith('_pending_'));
     currentTodos = todos.map(t => {
         if (dirtyIds.has(t.id)) {
@@ -159,6 +171,8 @@ export function scheduleRender(todos) {
     renderApp(currentTodos);
 }
 
+// --- Format helpers ---
+
 function formatDate(epoch) {
     const d = new Date(epoch * 86400000);
     return d.getDate().toString().padStart(2, '0') + '. ' + MONTH_NAMES[d.getMonth()];
@@ -168,70 +182,486 @@ function getDayName(epoch) {
     return DAY_NAMES[new Date(epoch * 86400000).getDay()];
 }
 
-export function renderApp(todos) {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
+// --- Keyboard handlers ---
 
-    if (isAnimating) return;
+// Attached once per input on creation; reads current todo state from currentTodos at event time
+// so it stays correct across reconciliation cycles without needing to be re-attached.
+function attachCalendarKeyboard(input, getDateEpoch, uid) {
+    let enterInFlight = false;
 
-    const active = document.activeElement;
-    const savedFocus = (active && active.dataset.id) ? {
-        id: active.dataset.id,
-        start: active.selectionStart,
-        end: active.selectionEnd
-    } : null;
+    const onEnter = async (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        if (enterInFlight) return;
+        enterInFlight = true;
 
-    const container = document.getElementById('app-content');
-    container.innerHTML = '';
+        const todoId = input.dataset.id;
+        const dateEpoch = getDateEpoch();
+        const cursor = input.selectionStart;
+        const before = input.value.slice(0, cursor);
+        const after = input.value.slice(cursor);
+        const idx = currentTodos.findIndex(t => t.id === todoId);
 
-    if (currentPage === 'todo') {
-        const today = getTodayEpoch();
-        for (let i = -1; i <= 6; i++) {
-            renderDaySection(container, today + i, today, todos, uid);
-        }
+        const next = currentTodos.find((t, i) => i > idx && t.dateEpochDay === dateEpoch);
+        const currentOrder = currentTodos[idx].sortOrder;
+        const nextOrder = next ? next.sortOrder : currentOrder + 2000;
+        const newSortOrder = (currentOrder + nextOrder) / 2;
 
-        if (shouldAnimate(today)) {
-            markAnimated(today);
-            const todaySection = [...container.querySelectorAll('.day-section')][1]; // index 1 = today (index 0 = yesterday)
-            if (todaySection) {
-                const inputs = [...todaySection.querySelectorAll('.todo-input')].filter(el => el.value.trim() !== '');
-                // neue Todos zuerst, dann farbige (moveCount >= 1)
-                inputs.sort((a, b) => {
-                    const aMoved = (currentTodos.find(t => t.id === a.dataset.id)?.moveCount || 0) >= 1 ? 1 : 0;
-                    const bMoved = (currentTodos.find(t => t.id === b.dataset.id)?.moveCount || 0) >= 1 ? 1 : 0;
-                    return aMoved - bMoved;
-                });
-                inputs.forEach(el => { el.dataset.fullText = el.value; el.value = ''; });
-                typeInputs(inputs).then(() => renderApp(currentTodos));
+        currentTodos[idx] = { ...currentTodos[idx], text: before };
+        dirtyIds.add(todoId);
+
+        // Optimistic: insert temp todo locally so focus lands immediately
+        const tempId = '_pending_' + Date.now();
+        currentTodos = [
+            ...currentTodos.slice(0, idx + 1),
+            { id: tempId, text: after, isDone: false, dateEpochDay: dateEpoch, sortOrder: newSortOrder, moveCount: 0 },
+            ...currentTodos.slice(idx + 1),
+        ];
+        focusTarget = { id: tempId, cursor: 0 };
+        renderApp(currentTodos);
+
+        const newDoc = await addTodo(uid, dateEpoch, after, newSortOrder);
+
+        // Swap temp id for real id in state and DOM — avoids a full re-render that would close mobile keyboard
+        currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
+        if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
+        document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+
+        enterInFlight = false;
+    };
+
+    // keypress is a fallback for Android keyboards that don't fire keydown on text inputs
+    input.addEventListener('keypress', onEnter);
+    input.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') { await onEnter(e); return; }
+
+        const todoId = input.dataset.id;
+        const dateEpoch = getDateEpoch();
+
+        if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
+            e.preventDefault();
+            const idx = currentTodos.findIndex(t => t.id === todoId);
+            const prev = currentTodos.slice(0, idx).reverse().find(t => t.dateEpochDay === dateEpoch);
+
+            if (!prev && input.value === '') {
+                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                dirtyIds.delete(todoId);
+                renderApp(currentTodos);
+                deleteTodo(uid, todoId);
+                return;
+            }
+            if (!prev) return;
+
+            if (input.value === '') {
+                focusTarget = { id: prev.id, cursor: prev.text.length };
+                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                dirtyIds.delete(todoId);
+                renderApp(currentTodos);
+                deleteTodo(uid, todoId);
+            } else {
+                const mergedText = prev.text + input.value;
+                const splitCursor = prev.text.length;
+                const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
+                currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
+                dirtyIds.add(prev.id);
+                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                dirtyIds.delete(todoId);
+                focusTarget = { id: prev.id, cursor: splitCursor };
+                renderApp(currentTodos);
+                deleteTodo(uid, todoId);
             }
         }
-    } else {
-        renderFlatSection(container, todos, uid);
-    }
 
-    if (focusTarget) {
-        const el = container.querySelector(`[data-id="${focusTarget.id}"]`);
-        if (el) { el.focus(); el.setSelectionRange(focusTarget.cursor, focusTarget.cursor); }
-        focusTarget = null;
-    } else if (savedFocus) {
-        const el = container.querySelector(`[data-id="${savedFocus.id}"]`);
-        if (el) { el.focus(); el.setSelectionRange(savedFocus.start, savedFocus.end); }
+        if (e.key === 'ArrowUp' && input.selectionStart === 0) {
+            e.preventDefault();
+            const idx = currentTodos.findIndex(t => t.id === todoId);
+            const prev = currentTodos.slice(0, idx).reverse().find(t => t.dateEpochDay === dateEpoch);
+            if (prev) {
+                const el = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
+                if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+            }
+        }
+
+        if (e.key === 'ArrowDown' && input.selectionStart === input.value.length) {
+            e.preventDefault();
+            const idx = currentTodos.findIndex(t => t.id === todoId);
+            const next = currentTodos.slice(idx + 1).find(t => t.dateEpochDay === dateEpoch);
+            if (next) {
+                const el = document.querySelector(`.todo-input[data-id="${next.id}"]`);
+                if (el) { el.focus(); el.setSelectionRange(0, 0); }
+            }
+        }
+    });
+}
+
+function attachFlatKeyboard(input, uid) {
+    let enterInFlight = false;
+
+    input.addEventListener('keydown', async (e) => {
+        const todoId = input.dataset.id;
+        // Read siblings fresh each event so ordering stays correct after adds/deletes
+        const siblings = currentTodos.filter(t => t.page === currentPage);
+
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (enterInFlight) return;
+            enterInFlight = true;
+
+            const cursor = input.selectionStart;
+            const before = input.value.slice(0, cursor);
+            const after = input.value.slice(cursor);
+            const idx = currentTodos.findIndex(t => t.id === todoId);
+            const sibIdx = siblings.findIndex(t => t.id === todoId);
+            const nextSib = siblings[sibIdx + 1];
+            const currentOrder = currentTodos[idx].sortOrder;
+            const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
+            const newSortOrder = (currentOrder + nextOrder) / 2;
+
+            currentTodos[idx] = { ...currentTodos[idx], text: before };
+            dirtyIds.add(todoId);
+
+            const tempId = '_pending_' + Date.now();
+            currentTodos = [
+                ...currentTodos.slice(0, idx + 1),
+                { id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage },
+                ...currentTodos.slice(idx + 1),
+            ];
+            focusTarget = { id: tempId, cursor: 0 };
+            renderApp(currentTodos);
+
+            const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage);
+
+            currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
+            if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
+            document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+
+            enterInFlight = false;
+        }
+
+        if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
+            e.preventDefault();
+            const sibIdx = siblings.findIndex(t => t.id === todoId);
+            const prev = siblings[sibIdx - 1];
+
+            if (!prev && input.value === '') {
+                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                dirtyIds.delete(todoId);
+                renderApp(currentTodos);
+                deleteTodo(uid, todoId);
+                return;
+            }
+            if (!prev) return;
+
+            if (input.value === '') {
+                focusTarget = { id: prev.id, cursor: prev.text.length };
+                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                dirtyIds.delete(todoId);
+                renderApp(currentTodos);
+                deleteTodo(uid, todoId);
+            } else {
+                const mergedText = prev.text + input.value;
+                const splitCursor = prev.text.length;
+                const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
+                currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
+                dirtyIds.add(prev.id);
+                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                dirtyIds.delete(todoId);
+                focusTarget = { id: prev.id, cursor: splitCursor };
+                renderApp(currentTodos);
+                deleteTodo(uid, todoId);
+            }
+        }
+
+        if (e.key === 'ArrowUp' && input.selectionStart === 0) {
+            e.preventDefault();
+            const prev = siblings[siblings.findIndex(t => t.id === todoId) - 1];
+            if (prev) {
+                const el = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
+                if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+            }
+        }
+
+        if (e.key === 'ArrowDown' && input.selectionStart === input.value.length) {
+            e.preventDefault();
+            const next = siblings[siblings.findIndex(t => t.id === todoId) + 1];
+            if (next) {
+                const el = document.querySelector(`.todo-input[data-id="${next.id}"]`);
+                if (el) { el.focus(); el.setSelectionRange(0, 0); }
+            }
+        }
+    });
+}
+
+// --- Row color helpers ---
+
+function calendarTextColor(todo, isPast, urgencyIntensity) {
+    if (todo.isDone || isPast) return 'var(--text-muted)';
+    if (todo.moveCount >= 1) return urgencyColor(todo.moveCount, urgencyIntensity);
+    return 'var(--text)';
+}
+
+function applySoonColor(input, todo) {
+    if (currentPage !== 'soon' || todo.isDone || !todo.createdAt) { input.style.color = ''; return; }
+    const ageWeeks = (Date.now() - todo.createdAt) / (7 * 24 * 60 * 60 * 1000);
+    if (ageWeeks >= 3)      input.style.color = SOON_COLORS[2];
+    else if (ageWeeks >= 2) input.style.color = SOON_COLORS[1];
+    else if (ageWeeks >= 1) input.style.color = SOON_COLORS[0];
+    else                    input.style.color = '';
+}
+
+// --- Row create / update (calendar) ---
+
+function createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensity) {
+    const row = document.createElement('div');
+    row.className = `todo-row${todo.isDone ? ' done' : ''}`;
+    row.dataset.id = todo.id;
+
+    row.appendChild(createCheckbox(uid, todo.isDone, isToday && !todo.isDone));
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.dataset.id = todo.id;
+    input.className = `todo-input${todo.isDone ? ' done' : ''}`;
+    input.value = todo.text;
+    input.style.color = calendarTextColor(todo, isPast, urgencyIntensity);
+    input.setAttribute('enterkeyhint', 'enter');
+
+    input.addEventListener('input', () => {
+        const id = input.dataset.id;
+        const idx = currentTodos.findIndex(t => t.id === id);
+        if (idx !== -1) currentTodos[idx] = { ...currentTodos[idx], text: input.value };
+        dirtyIds.add(id);
+        scheduleSave(id, input);
+    });
+
+    attachBlurSave(input);
+    attachCalendarKeyboard(input, () => dateEpoch, uid);
+
+    row.appendChild(input);
+    return row;
+}
+
+function updateCalendarRow(row, todo, isToday, isPast, urgencyIntensity) {
+    row.classList.toggle('done', todo.isDone);
+    updateCheckbox(row.querySelector('.checkbox-wrapper'), todo.isDone, isToday && !todo.isDone);
+
+    const input = row.querySelector('.todo-input');
+    input.classList.toggle('done', todo.isDone);
+
+    const textColor = calendarTextColor(todo, isPast, urgencyIntensity);
+    if (input.style.color !== textColor) input.style.color = textColor;
+
+    // Never overwrite text the user is actively editing or has unsaved changes
+    if (document.activeElement !== input && !dirtyIds.has(todo.id)) {
+        if (input.value !== todo.text) input.value = todo.text;
     }
 }
 
-function renderDaySection(container, dateEpoch, today, allTodos, uid) {
-    const isToday = dateEpoch === today;
-    const isPast = dateEpoch < today;
-    const dayTodos = allTodos.filter(t => t.dateEpochDay === dateEpoch && (!t.page || t.page === 'todo'));
+// --- Row create / update (flat) ---
 
-    if (expandedStates[dateEpoch] === undefined) {
-        expandedStates[dateEpoch] = !isPast;
+function createFlatRow(todo, uid) {
+    const row = document.createElement('div');
+    row.className = `todo-row${todo.isDone ? ' done' : ''}`;
+    row.dataset.id = todo.id;
+
+    row.appendChild(createCheckbox(uid, todo.isDone));
+
+    const input = document.createElement('textarea');
+    input.dataset.id = todo.id;
+    input.className = `todo-input${todo.isDone ? ' done' : ''}`;
+    input.value = todo.text;
+    input.rows = 1;
+    applySoonColor(input, todo);
+
+    const autoGrow = () => { input.style.height = 'auto'; input.style.height = input.scrollHeight + 'px'; };
+
+    input.addEventListener('input', () => {
+        const id = input.dataset.id;
+        const idx = currentTodos.findIndex(t => t.id === id);
+        if (idx !== -1) currentTodos[idx] = { ...currentTodos[idx], text: input.value };
+        dirtyIds.add(id);
+        scheduleSave(id, input);
+        autoGrow();
+    });
+
+    attachBlurSave(input);
+    attachFlatKeyboard(input, uid);
+
+    requestAnimationFrame(autoGrow);
+    row.appendChild(input);
+    return row;
+}
+
+function updateFlatRow(row, todo) {
+    row.classList.toggle('done', todo.isDone);
+    updateCheckbox(row.querySelector('.checkbox-wrapper'), todo.isDone, false);
+
+    const input = row.querySelector('.todo-input');
+    input.classList.toggle('done', todo.isDone);
+    applySoonColor(input, todo);
+
+    if (document.activeElement !== input && !dirtyIds.has(todo.id)) {
+        if (input.value !== todo.text) {
+            input.value = todo.text;
+            // Re-measure height since content changed programmatically
+            input.style.height = 'auto';
+            input.style.height = input.scrollHeight + 'px';
+        }
     }
-    const isOpen = expandedStates[dateEpoch];
+}
+
+// --- Core reconciliation ---
+
+// Reuses existing DOM rows by key (data-id), moves them into correct order, removes stale ones.
+// Existing rows are updated in place — the focused input is never destroyed.
+function reconcileRows(list, todos, anchor, existingById, createRow, updateRow) {
+    todos.forEach(todo => {
+        let row = existingById.get(todo.id);
+        if (row) {
+            updateRow(row, todo);
+            existingById.delete(todo.id);
+        } else {
+            row = createRow(todo);
+        }
+        list.insertBefore(row, anchor);
+    });
+    // Anything left in existingById was not in the new list — remove it
+    existingById.forEach(row => row.remove());
+}
+
+// --- Main entry point ---
+
+export function renderApp(todos) {
+    const uid = auth.currentUser?.uid;
+    if (!uid || isAnimating) return;
+
+    const container = document.getElementById('app-content');
+
+    if (currentPage === 'todo') {
+        reconcileCalendarView(container, todos, uid);
+    } else {
+        reconcileFlatView(container, todos, uid);
+    }
+
+    // Restore focus after Enter (new todo) or Backspace (merge) operations
+    if (focusTarget) {
+        const el = container.querySelector(`.todo-input[data-id="${focusTarget.id}"]`);
+        if (el) { el.focus(); el.setSelectionRange(focusTarget.cursor, focusTarget.cursor); }
+        focusTarget = null;
+    }
+}
+
+// --- Calendar view ---
+
+function reconcileCalendarView(container, todos, uid) {
+    container.querySelectorAll('.flat-list').forEach(el => el.remove());
+
+    const today = getTodayEpoch();
+    const epochs = Array.from({ length: 8 }, (_, i) => today - 1 + i);
+    const epochSet = new Set(epochs);
+
+    // Collect existing sections and remove any that have fallen out of the visible range
+    const existingSections = new Map();
+    container.querySelectorAll('.day-section[data-epoch]').forEach(s => {
+        const epoch = Number(s.dataset.epoch);
+        if (epochSet.has(epoch)) {
+            existingSections.set(epoch, s);
+        } else {
+            s.remove();
+        }
+    });
+
+    epochs.forEach(epoch => {
+        const dayTodos = todos.filter(t => t.dateEpochDay === epoch && (!t.page || t.page === 'todo'));
+        const existing = existingSections.get(epoch);
+
+        if (existing) {
+            reconcileDaySection(existing, epoch, today, dayTodos, uid);
+        } else {
+            const section = buildDaySection(epoch, today, dayTodos, uid);
+            // Insert before the next existing section to maintain chronological order
+            const nextSection = [...container.querySelectorAll('.day-section[data-epoch]')]
+                .find(s => Number(s.dataset.epoch) > epoch);
+            container.insertBefore(section, nextSection || null);
+            existingSections.set(epoch, section);
+        }
+    });
+
+    // Typing animation on first load of the day
+    if (shouldAnimate(today)) {
+        markAnimated(today);
+        const todaySection = container.querySelector(`.day-section[data-epoch="${today}"]`);
+        if (todaySection) {
+            const inputs = [...todaySection.querySelectorAll('.todo-input')].filter(el => el.value.trim() !== '');
+            // neue Todos zuerst animieren, dann farbige (moveCount >= 1)
+            inputs.sort((a, b) => {
+                const aMoved = (currentTodos.find(t => t.id === a.dataset.id)?.moveCount || 0) >= 1 ? 1 : 0;
+                const bMoved = (currentTodos.find(t => t.id === b.dataset.id)?.moveCount || 0) >= 1 ? 1 : 0;
+                return aMoved - bMoved;
+            });
+            inputs.forEach(el => { el.dataset.fullText = el.value; el.value = ''; });
+            typeInputs(inputs).then(() => renderApp(currentTodos));
+        }
+    }
+}
+
+function buildDaySection(dateEpoch, today, dayTodos, uid) {
+    const isPast = dateEpoch < today;
+    const isToday = dateEpoch === today;
+    if (expandedStates[dateEpoch] === undefined) expandedStates[dateEpoch] = !isPast;
 
     const section = document.createElement('div');
     section.className = 'day-section';
+    section.dataset.epoch = dateEpoch;
+    section.appendChild(buildDayHeader(dateEpoch, today));
 
+    const isOpen = expandedStates[dateEpoch];
+    const list = document.createElement('div');
+    list.className = `todo-list${isOpen ? '' : ' hidden'}`;
+
+    const urgencyIntensity = getUrgencyIntensity();
+    dayTodos.forEach(todo => list.appendChild(createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensity)));
+
+    if (isOpen) list.appendChild(buildAddBtn(dayTodos.length === 0, 'No tasks (tap to add)', () => addTodo(uid, dateEpoch)));
+
+    section.appendChild(list);
+    return section;
+}
+
+function reconcileDaySection(section, dateEpoch, today, dayTodos, uid) {
+    const isPast = dateEpoch < today;
+    const isToday = dateEpoch === today;
+    const isOpen = expandedStates[dateEpoch] ?? !isPast;
+
+    section.querySelector('.toggle-icon')?.classList.toggle('closed', !isOpen);
+
+    const list = section.querySelector('.todo-list');
+    list.classList.toggle('hidden', !isOpen);
+
+    const urgencyIntensity = getUrgencyIntensity();
+
+    const existingById = new Map();
+    list.querySelectorAll('.todo-row[data-id]').forEach(row => existingById.set(row.dataset.id, row));
+
+    let addBtn = list.querySelector('.tap-to-add');
+    if (!isOpen && addBtn) { addBtn.remove(); addBtn = null; }
+    if (isOpen && !addBtn) {
+        addBtn = buildAddBtn(dayTodos.length === 0, 'No tasks (tap to add)', () => addTodo(uid, dateEpoch));
+        list.appendChild(addBtn);
+    }
+    if (addBtn) addBtn.textContent = dayTodos.length === 0 ? 'No tasks (tap to add)' : '';
+
+    reconcileRows(
+        list, dayTodos, addBtn,
+        existingById,
+        todo => createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensity),
+        (row, todo) => updateCalendarRow(row, todo, isToday, isPast, urgencyIntensity)
+    );
+}
+
+function buildDayHeader(dateEpoch, today) {
+    const isToday = dateEpoch === today;
+    const isOpen = expandedStates[dateEpoch] ?? dateEpoch >= today;
     const header = document.createElement('div');
     header.className = 'day-header';
     header.innerHTML = `
@@ -243,322 +673,45 @@ function renderDaySection(container, dateEpoch, today, allTodos, uid) {
         expandedStates[dateEpoch] = !expandedStates[dateEpoch];
         renderApp(currentTodos);
     });
-    section.appendChild(header);
-
-    const list = document.createElement('div');
-    list.className = `todo-list${isOpen ? '' : ' hidden'}`;
-
-    const urgencyIntensity = getUrgencyIntensity(); // cache once per day section render
-
-    dayTodos.forEach(todo => {
-        const row = document.createElement('div');
-        row.className = `todo-row${todo.isDone ? ' done' : ''}`;
-
-        let textColor = 'var(--text)';
-        if (todo.isDone || isPast) {
-            textColor = 'var(--text-muted)';
-        } else if (todo.moveCount >= 1) {
-            textColor = urgencyColor(todo.moveCount, urgencyIntensity);
-        }
-
-        row.appendChild(createCheckbox(todo, uid, isToday && !todo.isDone));
-
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.dataset.id = todo.id;
-        input.className = `todo-input${todo.isDone ? ' done' : ''}`;
-        input.value = todo.text;
-        input.style.color = textColor;
-
-        input.setAttribute('enterkeyhint', 'enter');
-
-        input.addEventListener('input', () => {
-            const id = input.dataset.id;
-            const idx = currentTodos.findIndex(t => t.id === id);
-            if (idx !== -1) currentTodos[idx] = { ...currentTodos[idx], text: input.value };
-            dirtyIds.add(id);
-            scheduleSave(id, input);
-        });
-
-        attachBlurSave(input);
-
-        let enterInFlight = false;
-        const onEnter = async (e) => {
-            if (e.key !== 'Enter') return;
-            e.preventDefault();
-            if (enterInFlight) return;
-            enterInFlight = true;
-
-            const cursor = input.selectionStart;
-            const before = input.value.slice(0, cursor);
-            const after = input.value.slice(cursor);
-            const idx = currentTodos.findIndex(t => t.id === todo.id);
-
-            const next = currentTodos.find((t, i) => i > idx && t.dateEpochDay === dateEpoch);
-            const currentOrder = currentTodos[idx].sortOrder;
-            const nextOrder = next ? next.sortOrder : currentOrder + 2000;
-            const newSortOrder = (currentOrder + nextOrder) / 2;
-
-            currentTodos[idx] = { ...currentTodos[idx], text: before };
-            dirtyIds.add(todo.id);
-
-            // render locally before async write so focus doesn't jump
-            const tempId = '_pending_' + Date.now();
-            const tempTodo = {
-                id: tempId,
-                text: after,
-                isDone: false,
-                dateEpochDay: dateEpoch,
-                sortOrder: newSortOrder,
-                moveCount: 0,
-            };
-            currentTodos = [
-                ...currentTodos.slice(0, idx + 1),
-                tempTodo,
-                ...currentTodos.slice(idx + 1),
-            ];
-            focusTarget = { id: tempId, cursor: 0 };
-            renderApp(currentTodos);
-
-            const newDoc = await addTodo(uid, dateEpoch, after, newSortOrder);
-
-            // Update ID in place — avoid full re-render so keyboard stays open on mobile
-            currentTodos = currentTodos.map(t =>
-                t.id === tempId ? { ...t, id: newDoc.id } : t
-            );
-            if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
-            const tempEl = document.querySelector(`[data-id="${tempId}"]`);
-            if (tempEl) tempEl.dataset.id = newDoc.id;
-
-            enterInFlight = false;
-        };
-
-        // keypress is a fallback for Android keyboards that don't fire keydown on text inputs
-        input.addEventListener('keypress', onEnter);
-        input.addEventListener('keydown', async (e) => {
-            if (e.key === 'Enter') { await onEnter(e); return; }
-
-            if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
-                e.preventDefault();
-                const idx = currentTodos.findIndex(t => t.id === todo.id);
-                const prev = currentTodos.slice(0, idx).reverse().find(t => t.dateEpochDay === dateEpoch);
-                if (!prev && input.value === '') {
-                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
-                    dirtyIds.delete(todo.id);
-                    renderApp(currentTodos);
-                    deleteTodo(uid, todo.id);
-                    return;
-                }
-                if (!prev) return;
-
-                if (input.value === '') {
-                    focusTarget = { id: prev.id, cursor: prev.text.length };
-                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
-                    dirtyIds.delete(todo.id);
-                    renderApp(currentTodos);
-                    deleteTodo(uid, todo.id);
-                } else {
-                    const mergedText = prev.text + input.value;
-                    const splitCursor = prev.text.length;
-                    const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
-                    currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
-                    dirtyIds.add(prev.id);
-                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
-                    dirtyIds.delete(todo.id);
-                    focusTarget = { id: prev.id, cursor: splitCursor };
-                    renderApp(currentTodos);
-                    deleteTodo(uid, todo.id);
-                }
-            }
-
-            // move focus directly without re-render
-            if (e.key === 'ArrowUp' && input.selectionStart === 0) {
-                e.preventDefault();
-                const idx = currentTodos.findIndex(t => t.id === todo.id);
-                const prev = currentTodos.slice(0, idx).reverse().find(t => t.dateEpochDay === dateEpoch);
-                if (prev) {
-                    const el = document.querySelector(`[data-id="${prev.id}"]`);
-                    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
-                }
-            }
-
-            if (e.key === 'ArrowDown' && input.selectionStart === input.value.length) {
-                e.preventDefault();
-                const idx = currentTodos.findIndex(t => t.id === todo.id);
-                const next = currentTodos.slice(idx + 1).find(t => t.dateEpochDay === dateEpoch);
-                if (next) {
-                    const el = document.querySelector(`[data-id="${next.id}"]`);
-                    if (el) { el.focus(); el.setSelectionRange(0, 0); }
-                }
-            }
-        });
-
-        row.appendChild(input);
-        list.appendChild(row);
-    });
-
-    if (isOpen) {
-        const addBtn = document.createElement('div');
-        addBtn.className = 'tap-to-add';
-        if (dayTodos.length === 0) addBtn.textContent = 'No tasks (tap to add)';
-        addBtn.addEventListener('click', () => addTodo(uid, dateEpoch));
-        list.appendChild(addBtn);
-    }
-
-    section.appendChild(list);
-    container.appendChild(section);
+    return header;
 }
 
-function renderFlatSection(container, allTodos, uid) {
-    const pageTodos = allTodos.filter(t => t.page === currentPage);
-    const siblings = pageTodos; // stable reference for keyboard navigation
+function buildAddBtn(isEmpty, emptyText, onClick) {
+    const btn = document.createElement('div');
+    btn.className = 'tap-to-add';
+    if (isEmpty) btn.textContent = emptyText;
+    btn.addEventListener('click', onClick);
+    return btn;
+}
 
-    const list = document.createElement('div');
-    list.className = 'todo-list flat-list';
+// --- Flat view ---
 
-    pageTodos.forEach(todo => {
-        const row = document.createElement('div');
-        row.className = `todo-row${todo.isDone ? ' done' : ''}`;
+function reconcileFlatView(container, todos, uid) {
+    container.querySelectorAll('.day-section').forEach(s => s.remove());
 
-        row.appendChild(createCheckbox(todo, uid));
+    const pageTodos = todos.filter(t => t.page === currentPage);
 
-        const input = document.createElement('textarea');
-        input.dataset.id = todo.id;
-        input.className = `todo-input${todo.isDone ? ' done' : ''}`;
-        input.value = todo.text;
-        input.rows = 1;
+    let list = container.querySelector('.todo-list.flat-list');
+    if (!list) {
+        list = document.createElement('div');
+        list.className = 'todo-list flat-list';
+        container.appendChild(list);
+    }
 
-        if (currentPage === 'soon' && !todo.isDone && todo.createdAt) {
-            const ageWeeks = (Date.now() - todo.createdAt) / (7 * 24 * 60 * 60 * 1000);
-            if (ageWeeks >= 3)      input.style.color = SOON_COLORS[2];
-            else if (ageWeeks >= 2) input.style.color = SOON_COLORS[1];
-            else if (ageWeeks >= 1) input.style.color = SOON_COLORS[0];
-        }
+    const existingById = new Map();
+    list.querySelectorAll('.todo-row[data-id]').forEach(row => existingById.set(row.dataset.id, row));
 
-        const autoGrow = () => {
-            input.style.height = 'auto';
-            input.style.height = input.scrollHeight + 'px';
-        };
+    let addBtn = list.querySelector('.tap-to-add');
+    if (!addBtn) {
+        addBtn = buildAddBtn(pageTodos.length === 0, 'No items (tap to add)', () => addTodo(uid, 0, '', Date.now(), currentPage));
+        list.appendChild(addBtn);
+    }
+    addBtn.textContent = pageTodos.length === 0 ? 'No items (tap to add)' : '';
 
-        input.addEventListener('input', () => {
-            const id = input.dataset.id;
-            const idx = currentTodos.findIndex(t => t.id === id);
-            if (idx !== -1) currentTodos[idx] = { ...currentTodos[idx], text: input.value };
-            dirtyIds.add(id);
-            scheduleSave(id, input);
-            autoGrow();
-        });
-
-        attachBlurSave(input);
-
-        requestAnimationFrame(autoGrow);
-
-        let enterInFlight = false;
-        input.addEventListener('keydown', async (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                if (enterInFlight) return;
-                enterInFlight = true;
-
-                const cursor = input.selectionStart;
-                const before = input.value.slice(0, cursor);
-                const after = input.value.slice(cursor);
-                const idx = currentTodos.findIndex(t => t.id === todo.id);
-                const sibIdx = siblings.findIndex(t => t.id === todo.id);
-                const nextSib = siblings[sibIdx + 1];
-                const currentOrder = currentTodos[idx].sortOrder;
-                const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
-                const newSortOrder = (currentOrder + nextOrder) / 2;
-
-                currentTodos[idx] = { ...currentTodos[idx], text: before };
-                dirtyIds.add(todo.id);
-
-                const tempId = '_pending_' + Date.now();
-                const tempTodo = {
-                    id: tempId, text: after, isDone: false,
-                    dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage,
-                };
-                currentTodos = [
-                    ...currentTodos.slice(0, idx + 1),
-                    tempTodo,
-                    ...currentTodos.slice(idx + 1),
-                ];
-                focusTarget = { id: tempId, cursor: 0 };
-                renderApp(currentTodos);
-
-                const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage);
-
-                // Update ID in place — avoid full re-render so keyboard stays open on mobile
-                currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-                if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
-                const tempEl = document.querySelector(`[data-id="${tempId}"]`);
-                if (tempEl) tempEl.dataset.id = newDoc.id;
-
-                enterInFlight = false;
-            }
-
-            if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
-                e.preventDefault();
-                const sibIdx = siblings.findIndex(t => t.id === todo.id);
-                const prev = siblings[sibIdx - 1];
-
-                if (!prev && input.value === '') {
-                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
-                    dirtyIds.delete(todo.id);
-                    renderApp(currentTodos);
-                    deleteTodo(uid, todo.id);
-                    return;
-                }
-                if (!prev) return;
-
-                if (input.value === '') {
-                    focusTarget = { id: prev.id, cursor: prev.text.length };
-                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
-                    dirtyIds.delete(todo.id);
-                    renderApp(currentTodos);
-                    deleteTodo(uid, todo.id);
-                } else {
-                    const mergedText = prev.text + input.value;
-                    const splitCursor = prev.text.length;
-                    const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
-                    currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
-                    dirtyIds.add(prev.id);
-                    currentTodos = currentTodos.filter(t => t.id !== todo.id);
-                    dirtyIds.delete(todo.id);
-                    focusTarget = { id: prev.id, cursor: splitCursor };
-                    renderApp(currentTodos);
-                    deleteTodo(uid, todo.id);
-                }
-            }
-
-            if (e.key === 'ArrowUp' && input.selectionStart === 0) {
-                e.preventDefault();
-                const prev = siblings[siblings.findIndex(t => t.id === todo.id) - 1];
-                if (prev) {
-                    const el = document.querySelector(`[data-id="${prev.id}"]`);
-                    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
-                }
-            }
-
-            if (e.key === 'ArrowDown' && input.selectionStart === input.value.length) {
-                e.preventDefault();
-                const next = siblings[siblings.findIndex(t => t.id === todo.id) + 1];
-                if (next) {
-                    const el = document.querySelector(`[data-id="${next.id}"]`);
-                    if (el) { el.focus(); el.setSelectionRange(0, 0); }
-                }
-            }
-        });
-
-        row.appendChild(input);
-        list.appendChild(row);
-    });
-
-    const addBtn = document.createElement('div');
-    addBtn.className = 'tap-to-add';
-    if (pageTodos.length === 0) addBtn.textContent = 'No items (tap to add)';
-    addBtn.addEventListener('click', () => addTodo(uid, 0, '', Date.now(), currentPage));
-    list.appendChild(addBtn);
-
-    container.appendChild(list);
+    reconcileRows(
+        list, pageTodos, addBtn,
+        existingById,
+        todo => createFlatRow(todo, uid),
+        (row, todo) => updateFlatRow(row, todo)
+    );
 }

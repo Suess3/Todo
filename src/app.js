@@ -16,7 +16,19 @@ applyBannerPhoto();
 initBannerDrag();
 document.getElementById('version-label').textContent = VERSION;
 
-window.addEventListener('beforeunload', flushDirty);
+// pagehide is more reliable than beforeunload for async-safe save-on-exit
+window.addEventListener('pagehide', () => flushDirty());
+
+// Single module-level listener — avoids accumulation on re-login
+document.addEventListener('visibilitychange', () => {
+    if (!currentUid) return;
+    if (document.visibilityState === 'hidden') {
+        flushDirty();
+    } else {
+        moveTodos(currentUid).catch(e => console.error('moveTodos:', e));
+        cleanupNotes(currentUid).catch(e => console.error('cleanupNotes:', e));
+    }
+});
 
 function showApp() {
     document.getElementById('auth-screen').classList.add('hidden');
@@ -59,13 +71,6 @@ initAuth(
         if (saveInterval) clearInterval(saveInterval);
         saveInterval = setInterval(flushDirty, 60000);
 
-        // Re-run moveTodos when app comes back into focus (e.g. from background on mobile)
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && currentUid) {
-                moveTodos(currentUid).catch(e => console.error('moveTodos:', e));
-                cleanupNotes(currentUid).catch(e => console.error('cleanupNotes:', e));
-            }
-        });
     },
     () => {
         currentUid = null;
