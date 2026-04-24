@@ -1,4 +1,5 @@
 import { initAuth, renderAuthScreen, signOutUser } from './auth.js';
+import { initCharts } from './charts.js';
 import { moveTodos, subscribeTodos, cleanupNotes } from './todoService.js';
 import { scheduleRender, flushDirty, setPage } from './render.js';
 import { applyTheme, applyAccent, applyBgBrightness, applyPattern, applyBannerPhoto, initBannerDrag, initSettings } from './settings.js';
@@ -59,6 +60,7 @@ initAuth(
 
         document.getElementById('signout-btn').onclick = signOutUser;
         initSettings();
+        initCharts();
 
         try { await moveTodos(user.uid); } catch (e) { console.error('moveTodos:', e); }
         try { await cleanupNotes(user.uid); } catch (e) { console.error('cleanupNotes:', e); }

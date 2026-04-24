@@ -9,11 +9,26 @@
     <link rel="apple-touch-icon" href="icon.svg">
     <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
 </head>
 <body>
     <div id="auth-screen" class="hidden"></div>
     <div id="bg-pattern-overlay"></div>
     <div id="app" class="hidden">
+
+        <div id="charts-modal" class="modal-overlay hidden">
+            <div class="modal-card charts-card">
+                <div class="modal-header">
+                    <span>Productivity</span>
+                    <button id="charts-close" class="modal-close">✕</button>
+                </div>
+                <div id="charts-loading" class="charts-loading hidden">Loading…</div>
+                <div id="charts-content" class="charts-grid hidden">
+                    <div class="chart-wrap"><canvas id="week-chart"></canvas></div>
+                    <div class="chart-wrap"><canvas id="alltime-chart"></canvas></div>
+                </div>
+            </div>
+        </div>
 
         <div id="settings-modal" class="modal-overlay hidden">
             <div class="modal-card">
@@ -76,6 +91,7 @@
         <div id="app-banner">
             <div class="app-header">
                 <span id="version-label" class="version-label"></span>
+                <button id="charts-btn" class="settings-btn" title="Productivity">◑</button>
                 <button id="settings-btn" class="settings-btn">⚙︎</button>
                 <button id="signout-btn" class="signout-btn">Sign out</button>
             </div>
