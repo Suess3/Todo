@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todo-v41';
+const CACHE_NAME = 'todo-v43';
 
 const PRECACHE = [
     './',
@@ -11,6 +11,7 @@ const PRECACHE = [
     './src/settings.js',
     './src/todoService.js',
     './src/charts.js',
+    './src/animations.js',
     './src/version.js',
     'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
     'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js',

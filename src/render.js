@@ -1,6 +1,7 @@
 import { auth } from './firebase.js';
 import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, deleteTodo } from './todoService.js';
 import { getUrgencyIntensity, isBadgeEnabled } from './settings.js';
+import { triggerCheckAnimation } from './animations.js';
 
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -77,14 +78,19 @@ function createCheckbox(uid, isDone, todayUnchecked = false) {
         const id = wrapper.closest('.todo-row')?.dataset.id;
         if (!id || id.startsWith('_pending_')) return;
         const current = currentTodos.find(t => t.id === id);
-        if (current) toggleTodo(uid, id, !current.isDone);
+        if (!current) return;
+        const newState = !current.isDone;
+        if (newState) triggerCheckAnimation(wrapper); // only on check, not uncheck
+        toggleTodo(uid, id, newState);
     });
     return wrapper;
 }
 
 function updateCheckbox(wrapper, isDone, todayUnchecked) {
     const box = wrapper.querySelector('.checkbox');
-    box.className = ['checkbox', isDone ? 'checked' : '', todayUnchecked ? 'today-unchecked' : ''].filter(Boolean).join(' ');
+    // Use toggle instead of overwriting className so checkbox-bounce isn't interrupted mid-animation
+    box.classList.toggle('checked', isDone);
+    box.classList.toggle('today-unchecked', !!todayUnchecked);
     box.textContent = isDone ? '✓' : '';
 }
 

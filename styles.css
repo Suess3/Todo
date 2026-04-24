@@ -306,12 +306,25 @@ body {
     justify-content: center;
     color: white;
     font-size: 14px;
+    transform-origin: center;
 }
 .checkbox.checked {
     background-color: var(--accent);
     border-color: var(--accent);
 }
 .checkbox.today-unchecked { border-color: var(--text); }
+
+@keyframes checkbox-bounce {
+    0%   { transform: scale(1); }
+    18%  { transform: scale(0.68); }
+    48%  { transform: scale(1.32); }
+    70%  { transform: scale(0.91); }
+    86%  { transform: scale(1.07); }
+    100% { transform: scale(1); }
+}
+.checkbox.checkbox-bounce {
+    animation: checkbox-bounce 0.46s ease-out;
+}
 
 /* Input */
 .todo-input {
