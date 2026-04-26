@@ -161,6 +161,33 @@ body {
     cursor: grabbing;
 }
 
+.update-banner {
+    width: 100%;
+    max-width: 600px;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    color: white;
+    font-size: 13px;
+    padding: 6px 0;
+    text-align: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 100;
+}
+.update-banner button {
+    background: var(--accent);
+    border: none;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+}
+.update-banner button:hover {
+    filter: brightness(1.1);
+}
+
 .app-header {
     width: 100%;
     max-width: 600px;

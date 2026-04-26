@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todo-v47';
+const CACHE_NAME = 'todo-v48';
 
 const PRECACHE = [
     './',
@@ -24,7 +24,13 @@ self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE))
     );
-    self.skipWaiting();
+});
+
+// Listen for skipWaiting message from UI
+self.addEventListener('message', event => {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
+        self.skipWaiting();
+    }
 });
 
 // On activate: delete old caches so updates roll out immediately
