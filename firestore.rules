@@ -7,8 +7,5 @@ service cloud.firestore {
     match /users/{uid}/productivity/{dayId} {
       allow read, write: if request.auth.uid == uid;
     }
-    match /users/{uid}/pushSubscription/{docId} {
-      allow read, write: if request.auth.uid == uid;
-    }
   }
 }

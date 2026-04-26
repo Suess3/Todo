@@ -1,5 +1,3 @@
-import { getNotificationStatus, subscribeToNotifications, unsubscribeFromNotifications } from './notifications.js';
-
 const THEME_KEY = 'todo-theme';
 const URGENCY_KEY = 'todo-urgency-intensity';
 const ACCENT_KEY = 'todo-accent-hue';
@@ -175,21 +173,6 @@ export function initSettings() {
     // Theme toggle
     themeToggle.addEventListener('change', () => {
         setTheme(themeToggle.checked ? 'light' : 'dark');
-    });
-
-    // Notification toggle
-    const notifToggle = document.getElementById('notif-toggle');
-    getNotificationStatus().then(status => {
-        notifToggle.checked = status === 'subscribed';
-        notifToggle.disabled = status === 'unsupported' || status === 'denied';
-    });
-    notifToggle.addEventListener('change', async () => {
-        if (notifToggle.checked) {
-            const ok = await subscribeToNotifications();
-            if (!ok) notifToggle.checked = false;
-        } else {
-            await unsubscribeFromNotifications();
-        }
     });
 
     // Urgency slider
