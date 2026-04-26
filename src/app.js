@@ -32,6 +32,21 @@ applyBannerPhoto();
 initBannerDrag();
 document.getElementById('version-label').textContent = VERSION;
 
+// Splash: wait for spin-in to finish, then allow dismiss
+const splashDone = new Promise(resolve => {
+    const icon = document.getElementById('splash-icon');
+    icon ? icon.addEventListener('animationend', resolve, { once: true }) : resolve();
+});
+
+function dismissSplash() {
+    splashDone.then(() => {
+        const icon = document.getElementById('splash-icon');
+        if (!icon || icon.classList.contains('exit')) return;
+        icon.classList.add('exit');
+        icon.addEventListener('animationend', () => document.getElementById('splash')?.remove(), { once: true });
+    });
+}
+
 // pagehide is more reliable than beforeunload for async-safe save-on-exit
 window.addEventListener('pagehide', () => flushDirty());
 
@@ -47,6 +62,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 function showApp() {
+    dismissSplash();
     document.getElementById('auth-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     const tabs = document.getElementById('page-tabs');
@@ -61,6 +77,7 @@ function showApp() {
 }
 
 function showAuth() {
+    dismissSplash();
     document.getElementById('app').classList.add('hidden');
     renderAuthScreen();
 }

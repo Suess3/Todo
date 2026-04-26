@@ -10,8 +10,31 @@
     <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
+    <style>
+        #splash {
+            position: fixed; inset: 0; background: #121212;
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10000; pointer-events: none;
+        }
+        #splash-icon {
+            width: 96px; height: 96px; border-radius: 20px;
+            animation: splash-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
+        #splash-icon.exit {
+            animation: splash-out 0.45s cubic-bezier(0.36, 0, 0.66, -0.56) forwards;
+        }
+        @keyframes splash-in {
+            from { transform: rotate(540deg) scale(0); opacity: 0; }
+            to   { transform: rotate(0deg)   scale(1); opacity: 1; }
+        }
+        @keyframes splash-out {
+            from { transform: rotate(0deg)    scale(1); opacity: 1; }
+            to   { transform: rotate(-360deg) scale(0); opacity: 0; }
+        }
+    </style>
 </head>
 <body>
+    <div id="splash"><img id="splash-icon" src="icon.svg"></div>
     <div id="auth-screen" class="hidden"></div>
     <div id="bg-pattern-overlay"></div>
     <div id="app" class="hidden">
