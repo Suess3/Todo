@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todo-v61';
+const CACHE_NAME = 'todo-v62';
 
 const PRECACHE = [
     './',
@@ -12,6 +12,7 @@ const PRECACHE = [
     './src/todoService.js',
     './src/charts.js',
     './src/animations.js',
+    './src/notifications.js',
     './src/version.js',
     'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
     'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js',
@@ -42,6 +43,24 @@ self.addEventListener('activate', event => {
         )
     );
     self.clients.claim();
+});
+
+// Push: show notification when Cloud Function sends daily reminder
+self.addEventListener('push', event => {
+    const data = event.data?.json() || {};
+    event.waitUntil(
+        self.registration.showNotification(data.title || 'Todo', {
+            body: data.body || 'Time to check your todos!',
+            icon: '/icon.svg',
+            badge: '/icon.svg',
+            tag: 'daily-reminder',
+        })
+    );
+});
+
+self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    event.waitUntil(clients.openWindow('/'));
 });
 
 // Fetch: cache-first for app shell, network-only for Firebase API calls
