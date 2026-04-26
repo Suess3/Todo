@@ -19,7 +19,6 @@ import { initCharts } from './charts.js';
 import { moveTodos, subscribeTodos, cleanupNotes } from './todoService.js';
 import { scheduleRender, flushDirty, setPage } from './render.js';
 import { applyTheme, applyAccent, applyBgBrightness, applyPattern, applyBannerPhoto, initBannerDrag, initSettings } from './settings.js';
-import { playDemoSequence } from './animations.js';
 
 let unsubscribe = null;
 let currentUid = null;
@@ -75,7 +74,6 @@ initAuth(
         showApp();
 
         document.getElementById('signout-btn').onclick = signOutUser;
-        document.getElementById('anim-test-btn').onclick = playDemoSequence;
         initSettings();
         initCharts();
 

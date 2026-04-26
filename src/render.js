@@ -1,7 +1,7 @@
 import { auth } from './firebase.js';
 import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, deleteTodo, recordProductivity } from './todoService.js';
 import { getUrgencyIntensity, isBadgeEnabled } from './settings.js';
-import { triggerCheckAnimation } from './animations.js';
+import { triggerCheckAnimation, triggerCascade } from './animations.js';
 
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -115,6 +115,11 @@ function createCheckbox(uid, isDone, todayUnchecked = false) {
             if (!current.page || current.page === 'todo') {
                 recordProductivity(uid, current.moveCount || 0)
                     .catch(e => console.error('recordProductivity failed:', e));
+                // Fire cascade if this was the last unchecked todo for today
+                const today = getTodayEpoch();
+                const todayTodos = currentTodos.filter(t => t.dateEpochDay === today && (!t.page || t.page === 'todo') && t.text.trim() !== '');
+                const allDoneAfterThis = todayTodos.length > 0 && todayTodos.every(t => t.id === id || t.isDone);
+                if (allDoneAfterThis) setTimeout(triggerCascade, 400);
             }
         }
         toggleTodo(uid, id, newState).catch(e => {
