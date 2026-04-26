@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todo-v48';
+const CACHE_NAME = 'todo-v49';
 
 const PRECACHE = [
     './',
@@ -24,6 +24,7 @@ self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE))
     );
+    self.skipWaiting(); // Force update for this transition
 });
 
 // Listen for skipWaiting message from UI
