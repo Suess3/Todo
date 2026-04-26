@@ -1,3 +1,19 @@
+import { VERSION } from './version.js';
+
+// --- Force Update Logic ---
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.ready.then(reg => {
+        reg.update(); // Poke the SW to check for changes
+        
+        // If we've been waiting for an update for a while, just force it
+        // This is a one-time bridge to get off old versions
+        if (reg.waiting && !window.sessionStorage.getItem('todo-force-reloaded')) {
+            window.sessionStorage.setItem('todo-force-reloaded', 'true');
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        }
+    });
+}
+
 import { initAuth, renderAuthScreen, signOutUser } from './auth.js';
 import { initCharts } from './charts.js';
 import { moveTodos, subscribeTodos, cleanupNotes } from './todoService.js';
