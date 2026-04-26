@@ -1,6 +1,6 @@
 import { auth } from './firebase.js';
 import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, deleteTodo, recordProductivity } from './todoService.js';
-import { getUrgencyIntensity, isBadgeEnabled } from './settings.js';
+import { getUrgencyIntensity } from './settings.js';
 import { triggerCheckAnimation, triggerCascade } from './animations.js';
 
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
@@ -222,17 +222,6 @@ export async function flushDirty() {
     }
 }
 
-function updateBadge(todos) {
-    if (!('setAppBadge' in navigator)) return;
-    if (!isBadgeEnabled()) { navigator.clearAppBadge(); return; }
-    const today = getTodayEpoch();
-    const count = todos.filter(t =>
-        !t.isDone && (!t.page || t.page === 'todo') && t.dateEpochDay === today
-    ).length;
-    count > 0 ? navigator.setAppBadge(count) : navigator.clearAppBadge();
-}
-
-document.addEventListener('badge-changed', () => updateBadge(currentTodos));
 
 export function scheduleRender(todos) {
     // Preserve unsaved local edits — don't let Firestore overwrite in-flight text
@@ -244,7 +233,6 @@ export function scheduleRender(todos) {
         }
         return t;
     });
-    updateBadge(currentTodos);
     // Skip re-render while an Enter is in flight — avoids losing the temp todo + focus
     if (pendingTodos.length > 0) return;
     // Skip re-render while user is actively editing — insertBefore triggers iOS keyboard dismissal

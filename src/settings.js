@@ -5,13 +5,7 @@ const BG_BRIGHTNESS_KEY = 'todo-bg-brightness';
 const BG_PATTERN_KEY = 'todo-bg-pattern';
 const BG_PATTERN_OPACITY_KEY = 'todo-bg-pattern-opacity';
 const BANNER_KEY = 'todo-banner-photo';
-const BADGE_KEY = 'todo-badge-enabled';
-
 const BANNER_POS_KEY = 'todo-banner-pos';
-
-export function isBadgeEnabled() {
-    return localStorage.getItem(BADGE_KEY) === 'true';
-}
 
 export function getUrgencyIntensity() {
     return parseInt(localStorage.getItem(URGENCY_KEY) ?? '50');
@@ -179,26 +173,6 @@ export function initSettings() {
     // Theme toggle
     themeToggle.addEventListener('change', () => {
         setTheme(themeToggle.checked ? 'light' : 'dark');
-    });
-
-    // Badge toggle
-    const badgeToggle = document.getElementById('badge-toggle');
-    badgeToggle.checked = isBadgeEnabled();
-    badgeToggle.addEventListener('change', async () => {
-        if (badgeToggle.checked) {
-            if (Notification.permission !== 'granted') {
-                const permission = await Notification.requestPermission();
-                if (permission !== 'granted') {
-                    badgeToggle.checked = false;
-                    return;
-                }
-            }
-            localStorage.setItem(BADGE_KEY, 'true');
-        } else {
-            localStorage.setItem(BADGE_KEY, 'false');
-            if ('clearAppBadge' in navigator) navigator.clearAppBadge();
-        }
-        document.dispatchEvent(new CustomEvent('badge-changed'));
     });
 
     // Urgency slider
