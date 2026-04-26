@@ -84,7 +84,8 @@ function createCheckbox(uid, isDone, todayUnchecked = false) {
             triggerCheckAnimation(wrapper);
             // Only record productivity for the main todo page
             if (!current.page || current.page === 'todo') {
-                recordProductivity(uid, current.moveCount || 0);
+                recordProductivity(uid, current.moveCount || 0)
+                    .catch(e => console.error('recordProductivity failed:', e));
             }
         }
         toggleTodo(uid, id, newState);
