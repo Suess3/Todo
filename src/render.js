@@ -247,8 +247,9 @@ export function scheduleRender(todos) {
     updateBadge(currentTodos);
     // Skip re-render while an Enter is in flight — avoids losing the temp todo + focus
     if (pendingTodos.length > 0) return;
-    // Skip re-render while user is editing — insertBefore triggers iOS keyboard dismissal
-    if (document.activeElement?.classList.contains('todo-input')) return;
+    // Skip re-render while user is actively editing — insertBefore triggers iOS keyboard dismissal
+    // Only skip if todo inputs are already in the DOM (i.e. not the initial render)
+    if (document.querySelector('.todo-input') && document.activeElement?.classList.contains('todo-input')) return;
     renderApp(currentTodos);
 }
 
