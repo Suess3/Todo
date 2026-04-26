@@ -92,9 +92,6 @@
         </div>
 
         <div id="app-banner">
-            <div id="update-banner" class="update-banner hidden">
-                New version available. <button id="update-btn">Update now</button>
-            </div>
             <div class="app-header">
                 <span id="version-label" class="version-label"></span>
                 <span id="save-status" class="save-status hidden"></span>
@@ -116,30 +113,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js').then(reg => {
-                    const banner = document.getElementById('update-banner');
-                    const btn = document.getElementById('update-btn');
-
-                    const showBanner = () => {
-                        banner.classList.remove('hidden');
-                        btn.onclick = () => {
-                            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-                        };
-                    };
-
-                    if (reg.waiting) {
-                        showBanner();
-                    }
-
-                    reg.addEventListener('updatefound', () => {
-                        const newWorker = reg.installing;
-                        newWorker.addEventListener('statechange', () => {
-                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                showBanner();
-                            }
-                        });
-                    });
-                });
+                navigator.serviceWorker.register('./sw.js');
             });
 
             let refreshing = false;
