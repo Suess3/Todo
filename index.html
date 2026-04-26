@@ -97,6 +97,7 @@
             </div>
             <div class="app-header">
                 <span id="version-label" class="version-label"></span>
+                <span id="save-status" class="save-status hidden"></span>
                 <button id="charts-btn" class="settings-btn" title="Productivity">◑</button>
                 <button id="settings-btn" class="settings-btn">⚙︎</button>
             </div>
@@ -110,6 +111,7 @@
 
         <div id="app-content" class="app-container"></div>
     </div>
+    <div id="toast-container" class="toast-container"></div>
     <script type="module" src="src/app.js"></script>
     <script>
         if ('serviceWorker' in navigator) {

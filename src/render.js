@@ -16,6 +16,35 @@ let isAnimating = false;
 const ANIM_KEY = 'todo-animated-day';
 const saveTimers = new Map();
 
+function updateSaveStatus(status) {
+    const el = document.getElementById('save-status');
+    if (!el) return;
+    el.classList.remove('hidden', 'error');
+    if (status === 'saving') {
+        el.textContent = 'Saving…';
+    } else if (status === 'error') {
+        el.textContent = 'Save failed';
+        el.classList.add('error');
+    } else {
+        el.classList.add('hidden');
+    }
+}
+
+export function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(10px)';
+        toast.style.transition = 'opacity 0.3s, transform 0.3s';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
 const PASTEL_COLORS = ['#F0DC8A', '#F0C880', '#F0B478', '#F0A074', '#EE9090'];
 const VIVID_COLORS  = ['#E8C420', '#E89028', '#E06828', '#D44A28', '#C83232'];
 const SOON_COLORS   = ['#E8D99A', '#E0B98A', '#E09090']; // 1 week, 2 weeks, 3+ weeks
@@ -88,7 +117,10 @@ function createCheckbox(uid, isDone, todayUnchecked = false) {
                     .catch(e => console.error('recordProductivity failed:', e));
             }
         }
-        toggleTodo(uid, id, newState);
+        toggleTodo(uid, id, newState).catch(e => {
+            showToast('Failed to update status', 'error');
+            console.error(e);
+        });
     });
     return wrapper;
 }
@@ -114,8 +146,16 @@ function scheduleSave(id, inputEl) {
         const todo = currentTodos.find(t => t.id === currentId);
         if (!todo) return;
         dirtyIds.delete(currentId);
-        try { await updateTodoText(uid, currentId, todo.text); }
-        catch { dirtyIds.add(currentId); }
+        updateSaveStatus('saving');
+        try { 
+            await updateTodoText(uid, currentId, todo.text); 
+            updateSaveStatus('idle');
+        } catch (e) { 
+            dirtyIds.add(currentId); 
+            updateSaveStatus('error');
+            showToast('Failed to save changes', 'error');
+            console.error(e);
+        }
     }, 2000));
 }
 
@@ -130,8 +170,16 @@ function attachBlurSave(input) {
         const todo = currentTodos.find(t => t.id === id);
         if (!todo) return;
         dirtyIds.delete(id);
-        try { await updateTodoText(uid, id, todo.text); }
-        catch { dirtyIds.add(id); }
+        updateSaveStatus('saving');
+        try { 
+            await updateTodoText(uid, id, todo.text); 
+            updateSaveStatus('idle');
+        } catch (e) { 
+            dirtyIds.add(id); 
+            updateSaveStatus('error');
+            showToast('Failed to save changes', 'error');
+            console.error(e);
+        }
     });
 }
 
@@ -147,13 +195,26 @@ export async function flushDirty() {
     const uid = auth.currentUser?.uid;
     if (!uid || dirtyIds.size === 0) return;
     const ids = [...dirtyIds].filter(id => !id.startsWith('_pending_'));
-    await Promise.all(ids.map(async id => {
-        const todo = currentTodos.find(t => t.id === id);
-        if (!todo) return;
-        dirtyIds.delete(id);
-        try { await updateTodoText(uid, id, todo.text); }
-        catch { dirtyIds.add(id); }
-    }));
+    if (ids.length === 0) return;
+    
+    updateSaveStatus('saving');
+    try {
+        await Promise.all(ids.map(async id => {
+            const todo = currentTodos.find(t => t.id === id);
+            if (!todo) return;
+            dirtyIds.delete(id);
+            try { await updateTodoText(uid, id, todo.text); }
+            catch (e) { 
+                dirtyIds.add(id); 
+                throw e;
+            }
+        }));
+        updateSaveStatus('idle');
+    } catch (e) {
+        updateSaveStatus('error');
+        showToast('Sync failed', 'error');
+        console.error(e);
+    }
 }
 
 function updateBadge(todos) {
@@ -233,12 +294,23 @@ function attachCalendarKeyboard(input, getDateEpoch, uid) {
         focusTarget = { id: tempId, cursor: 0 };
         renderApp(currentTodos);
 
-        const newDoc = await addTodo(uid, dateEpoch, after, newSortOrder);
+        try {
+            updateSaveStatus('saving');
+            const newDoc = await addTodo(uid, dateEpoch, after, newSortOrder);
+            updateSaveStatus('idle');
 
-        // Swap temp id for real id in state and DOM — avoids a full re-render that would close mobile keyboard
-        currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-        if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
-        document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+            // Swap temp id for real id in state and DOM — avoids a full re-render that would close mobile keyboard
+            currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
+            if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
+            document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+        } catch (e) {
+            updateSaveStatus('error');
+            showToast('Failed to create todo', 'error');
+            // Remove temp todo if creation failed
+            currentTodos = currentTodos.filter(t => t.id !== tempId);
+            renderApp(currentTodos);
+            console.error(e);
+        }
 
         enterInFlight = false;
     };
@@ -260,7 +332,7 @@ function attachCalendarKeyboard(input, getDateEpoch, uid) {
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 renderApp(currentTodos);
-                deleteTodo(uid, todoId);
+                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
                 return;
             }
             if (!prev) return;
@@ -270,7 +342,7 @@ function attachCalendarKeyboard(input, getDateEpoch, uid) {
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 renderApp(currentTodos);
-                deleteTodo(uid, todoId);
+                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
             } else {
                 const mergedText = prev.text + input.value;
                 const splitCursor = prev.text.length;
@@ -281,7 +353,7 @@ function attachCalendarKeyboard(input, getDateEpoch, uid) {
                 dirtyIds.delete(todoId);
                 focusTarget = { id: prev.id, cursor: splitCursor };
                 renderApp(currentTodos);
-                deleteTodo(uid, todoId);
+                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
             }
         }
 
@@ -342,11 +414,21 @@ function attachFlatKeyboard(input, uid) {
             focusTarget = { id: tempId, cursor: 0 };
             renderApp(currentTodos);
 
-            const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage);
+            try {
+                updateSaveStatus('saving');
+                const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage);
+                updateSaveStatus('idle');
 
-            currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-            if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
-            document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+                currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
+                if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
+                document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+            } catch (e) {
+                updateSaveStatus('error');
+                showToast('Failed to create todo', 'error');
+                currentTodos = currentTodos.filter(t => t.id !== tempId);
+                renderApp(currentTodos);
+                console.error(e);
+            }
 
             enterInFlight = false;
         }
@@ -360,7 +442,7 @@ function attachFlatKeyboard(input, uid) {
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 renderApp(currentTodos);
-                deleteTodo(uid, todoId);
+                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
                 return;
             }
             if (!prev) return;
@@ -370,7 +452,7 @@ function attachFlatKeyboard(input, uid) {
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 renderApp(currentTodos);
-                deleteTodo(uid, todoId);
+                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
             } else {
                 const mergedText = prev.text + input.value;
                 const splitCursor = prev.text.length;
@@ -381,7 +463,7 @@ function attachFlatKeyboard(input, uid) {
                 dirtyIds.delete(todoId);
                 focusTarget = { id: prev.id, cursor: splitCursor };
                 renderApp(currentTodos);
-                deleteTodo(uid, todoId);
+                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
             }
         }
 
@@ -635,7 +717,7 @@ function buildDaySection(dateEpoch, today, dayTodos, uid) {
     const urgencyIntensity = getUrgencyIntensity();
     dayTodos.forEach(todo => list.appendChild(createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensity)));
 
-    if (isOpen) list.appendChild(buildAddBtn(dayTodos.length === 0, 'No tasks (tap to add)', () => addTodo(uid, dateEpoch)));
+    if (isOpen) list.appendChild(buildAddBtn(dayTodos.length === 0, 'No tasks (tap to add)', () => addTodo(uid, dateEpoch).catch(e => { showToast('Failed to create todo', 'error'); console.error(e); })));
 
     section.appendChild(list);
     return section;
@@ -659,7 +741,7 @@ function reconcileDaySection(section, dateEpoch, today, dayTodos, uid) {
     let addBtn = list.querySelector('.tap-to-add');
     if (!isOpen && addBtn) { addBtn.remove(); addBtn = null; }
     if (isOpen && !addBtn) {
-        addBtn = buildAddBtn(dayTodos.length === 0, 'No tasks (tap to add)', () => addTodo(uid, dateEpoch));
+        addBtn = buildAddBtn(dayTodos.length === 0, 'No tasks (tap to add)', () => addTodo(uid, dateEpoch).catch(e => { showToast('Failed to create todo', 'error'); console.error(e); }));
         list.appendChild(addBtn);
     }
     if (addBtn) addBtn.textContent = dayTodos.length === 0 ? 'No tasks (tap to add)' : '';
@@ -716,7 +798,7 @@ function reconcileFlatView(container, todos, uid) {
 
     let addBtn = list.querySelector('.tap-to-add');
     if (!addBtn) {
-        addBtn = buildAddBtn(pageTodos.length === 0, 'No items (tap to add)', () => addTodo(uid, 0, '', Date.now(), currentPage));
+        addBtn = buildAddBtn(pageTodos.length === 0, 'No items (tap to add)', () => addTodo(uid, 0, '', Date.now(), currentPage).catch(e => { showToast('Failed to create item', 'error'); console.error(e); }));
         list.appendChild(addBtn);
     }
     addBtn.textContent = pageTodos.length === 0 ? 'No items (tap to add)' : '';
