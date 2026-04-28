@@ -329,7 +329,8 @@ body {
 
 @media (max-width: 768px) {
     .drag-handle {
-        opacity: 0.3;
+        opacity: 0;
+        pointer-events: none;
     }
 }
 
