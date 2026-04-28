@@ -836,7 +836,7 @@ function initDragAndDrop() {
         const handle = e.target.closest('.drag-handle');
         const row = e.target.closest('.todo-row');
 
-        if (!row || row.classList.contains('done')) return;
+        if (!row) return;
         if (!isTouch && !handle) return;
 
         draggedRow = row;
