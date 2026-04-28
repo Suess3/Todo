@@ -302,10 +302,50 @@ body {
     display: flex;
     align-items: center;
     padding: 4px;
-    transition: opacity 0.2s;
+    transition: opacity 0.2s, transform 0.2s ease;
 }
 .todo-row.done {
     opacity: 0.4;
+}
+
+/* Drag and Drop */
+.drag-handle {
+    cursor: grab;
+    padding: 0 8px 0 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    font-size: 14px;
+    color: var(--text);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+}
+.todo-row:hover .drag-handle {
+    opacity: 0.5;
+}
+.drag-handle:hover {
+    opacity: 1 !important;
+}
+
+@media (max-width: 768px) {
+    .drag-handle {
+        opacity: 0.3;
+    }
+}
+
+.todo-row.is-dragging {
+    opacity: 0.9 !important;
+    background: var(--bg);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    border-radius: 8px;
+    pointer-events: none;
+    z-index: 1000;
+    transition: none !important;
+}
+
+.drag-placeholder {
+    width: 100%;
+    background: transparent;
 }
 
 /* Checkbox */

@@ -507,6 +507,11 @@ function createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensi
     row.className = `todo-row${todo.isDone ? ' done' : ''}`;
     row.dataset.id = todo.id;
 
+    const dragHandle = document.createElement('div');
+    dragHandle.className = 'drag-handle';
+    dragHandle.innerHTML = '⋮⋮';
+    row.appendChild(dragHandle);
+
     row.appendChild(createCheckbox(uid, todo.isDone, isToday && !todo.isDone));
 
     const input = document.createElement('input');
@@ -806,3 +811,164 @@ function reconcileFlatView(container, todos, uid) {
         (row, todo) => updateFlatRow(row, todo)
     );
 }
+
+// --- Drag and Drop ---
+
+function initDragAndDrop() {
+    const container = document.getElementById('app-content');
+    if (!container) return;
+
+    let draggedRow = null;
+    let placeholder = null;
+    let startY = 0;
+    let currentY = 0;
+    let dragTimeout = null;
+    let siblings = [];
+    let draggedHeight = 0;
+    let dragStartIndex = -1;
+    let isDragging = false;
+
+    container.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+
+        const isTouch = e.pointerType === 'touch';
+        const handle = e.target.closest('.drag-handle');
+        const row = e.target.closest('.todo-row');
+
+        if (!row || row.classList.contains('done')) return;
+        if (!isTouch && !handle) return;
+
+        draggedRow = row;
+        startY = e.clientY;
+
+        const startDrag = () => {
+            isDragging = true;
+            if (navigator.vibrate) navigator.vibrate(50);
+
+            placeholder = document.createElement('div');
+            placeholder.className = 'drag-placeholder';
+            draggedHeight = draggedRow.offsetHeight;
+            placeholder.style.height = `${draggedHeight}px`;
+
+            const list = draggedRow.parentElement;
+            siblings = Array.from(list.querySelectorAll('.todo-row:not(.done)'));
+            dragStartIndex = siblings.indexOf(draggedRow);
+
+            draggedRow.classList.add('is-dragging');
+            draggedRow.style.width = `${draggedRow.offsetWidth}px`;
+
+            draggedRow.parentElement.insertBefore(placeholder, draggedRow);
+
+            const rect = draggedRow.getBoundingClientRect();
+            draggedRow.style.position = 'fixed';
+            draggedRow.style.top = `${rect.top}px`;
+            draggedRow.style.left = `${rect.left}px`;
+            draggedRow.style.zIndex = '1000';
+            
+            container.setPointerCapture(e.pointerId);
+        };
+
+        if (isTouch && !handle) {
+            dragTimeout = setTimeout(startDrag, 300);
+        } else {
+            startDrag();
+        }
+    });
+
+    container.addEventListener('pointermove', (e) => {
+        if (!draggedRow) return;
+
+        if (!isDragging) {
+            if (Math.abs(e.clientY - startY) > 10) {
+                clearTimeout(dragTimeout);
+                draggedRow = null;
+            }
+            return;
+        }
+
+        e.preventDefault();
+
+        currentY = e.clientY - startY;
+        draggedRow.style.transform = `translateY(${currentY}px)`;
+
+        for (let i = 0; i < siblings.length; i++) {
+            if (i === dragStartIndex) continue;
+            const sib = siblings[i];
+            const rect = sib.getBoundingClientRect();
+            const mid = rect.top + rect.height / 2;
+
+            if (e.clientY < mid) {
+                if (i < dragStartIndex) sib.style.transform = `translateY(${draggedHeight}px)`;
+                else sib.style.transform = '';
+            } else {
+                if (i > dragStartIndex) sib.style.transform = `translateY(-${draggedHeight}px)`;
+                else sib.style.transform = '';
+            }
+        }
+    });
+
+    const endDrag = (e) => {
+        clearTimeout(dragTimeout);
+        if (!isDragging) {
+            draggedRow = null;
+            return;
+        }
+
+        try { container.releasePointerCapture(e.pointerId); } catch(err){}
+        isDragging = false;
+
+        siblings.forEach(sib => {
+            const rect = sib.getBoundingClientRect();
+            sib.dataset.visualY = rect.top;
+        });
+
+        draggedRow.dataset.visualY = e.clientY;
+        siblings.sort((a, b) => parseFloat(a.dataset.visualY) - parseFloat(b.dataset.visualY));
+
+        const newIndex = siblings.indexOf(draggedRow);
+
+        placeholder.remove();
+        draggedRow.classList.remove('is-dragging');
+        draggedRow.style = '';
+        siblings.forEach(s => { s.style.transform = ''; delete s.dataset.visualY; });
+
+        if (newIndex !== dragStartIndex) {
+            const prevId = newIndex > 0 ? siblings[newIndex - 1].dataset.id : null;
+            const nextId = newIndex < siblings.length - 1 ? siblings[newIndex + 1].dataset.id : null;
+            handleDrop(draggedRow.dataset.id, prevId, nextId);
+        }
+
+        draggedRow = null;
+    };
+
+    container.addEventListener('pointerup', endDrag);
+    container.addEventListener('pointercancel', endDrag);
+}
+
+function handleDrop(draggedId, prevId, nextId) {
+    const prev = currentTodos.find(t => t.id === prevId);
+    const next = currentTodos.find(t => t.id === nextId);
+    
+    let newSortOrder;
+    if (prev && next) {
+        newSortOrder = (prev.sortOrder + next.sortOrder) / 2;
+    } else if (prev) {
+        newSortOrder = prev.sortOrder + 2000;
+    } else if (next) {
+        newSortOrder = next.sortOrder - 2000;
+    } else {
+        newSortOrder = Date.now();
+    }
+
+    const idx = currentTodos.findIndex(t => t.id === draggedId);
+    if (idx !== -1) {
+        currentTodos[idx].sortOrder = newSortOrder;
+        dirtyIds.add(draggedId);
+        
+        const input = document.querySelector(`.todo-row[data-id="${draggedId}"] .todo-input`);
+        scheduleSave(draggedId, input);
+        scheduleRender(currentTodos);
+    }
+}
+
+initDragAndDrop();
