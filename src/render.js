@@ -917,9 +917,6 @@ function initDragAndDrop() {
         try { container.releasePointerCapture(e.pointerId); } catch(err){}
         isDragging = false;
 
-        // Sibling transforms encode the new order: shifted items have moved across draggedRow.
-        // Items above dragStart with a transform shifted DOWN (draggedRow went above them).
-        // Items below dragStart with a transform shifted UP (draggedRow went past them).
         const before = [
             ...siblings.slice(0, dragStartIndex).filter(s => !s.style.transform),
             ...siblings.slice(dragStartIndex + 1).filter(s => s.style.transform),
@@ -993,8 +990,9 @@ function handleDrop(draggedId, prevId, nextId) {
     const idx = currentTodos.findIndex(t => t.id === draggedId);
     if (idx !== -1) {
         currentTodos[idx].sortOrder = newSortOrder;
+        currentTodos.sort((a, b) => a.sortOrder - b.sortOrder);
         dirtyIds.add(draggedId);
-        
+
         const input = document.querySelector(`.todo-row[data-id="${draggedId}"] .todo-input`);
         scheduleSave(draggedId, input);
         scheduleRender(currentTodos);
