@@ -917,24 +917,27 @@ function initDragAndDrop() {
         try { container.releasePointerCapture(e.pointerId); } catch(err){}
         isDragging = false;
 
-        siblings.forEach(sib => {
-            const rect = sib.getBoundingClientRect();
-            sib.dataset.visualY = rect.top;
-        });
-
-        draggedRow.dataset.visualY = e.clientY;
-        siblings.sort((a, b) => parseFloat(a.dataset.visualY) - parseFloat(b.dataset.visualY));
-
-        const newIndex = siblings.indexOf(draggedRow);
+        // Sibling transforms encode the new order: shifted items have moved across draggedRow.
+        // Items above dragStart with a transform shifted DOWN (draggedRow went above them).
+        // Items below dragStart with a transform shifted UP (draggedRow went past them).
+        const before = [
+            ...siblings.slice(0, dragStartIndex).filter(s => !s.style.transform),
+            ...siblings.slice(dragStartIndex + 1).filter(s => s.style.transform),
+        ];
+        const after = [
+            ...siblings.slice(0, dragStartIndex).filter(s => s.style.transform),
+            ...siblings.slice(dragStartIndex + 1).filter(s => !s.style.transform),
+        ];
+        const newIndex = before.length;
 
         placeholder.remove();
         draggedRow.classList.remove('is-dragging');
         draggedRow.style = '';
-        siblings.forEach(s => { s.style.transform = ''; delete s.dataset.visualY; });
+        siblings.forEach(s => s.style.transform = '');
 
         if (newIndex !== dragStartIndex) {
-            const prevId = newIndex > 0 ? siblings[newIndex - 1].dataset.id : null;
-            const nextId = newIndex < siblings.length - 1 ? siblings[newIndex + 1].dataset.id : null;
+            const prevId = before.length > 0 ? before[before.length - 1].dataset.id : null;
+            const nextId = after.length > 0 ? after[0].dataset.id : null;
             handleDrop(draggedRow.dataset.id, prevId, nextId);
         }
 
@@ -968,7 +971,7 @@ function initDragAndDrop() {
     }, { passive: false });
 
     container.addEventListener('touchend', () => {
-        if (isDragging) endDrag({ clientY: lastClientY, pointerId: null });
+        if (isDragging) endDrag({ pointerId: null });
     });
 }
 
