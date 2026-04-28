@@ -83,6 +83,10 @@ export async function updateTodoText(uid, id, text) {
     return updateDoc(doc(db, 'users', uid, 'todos', id), { text });
 }
 
+export async function updateSortOrder(uid, id, sortOrder) {
+    return updateDoc(doc(db, 'users', uid, 'todos', id), { sortOrder });
+}
+
 export async function deleteTodo(uid, id) {
     return deleteDoc(doc(db, 'users', uid, 'todos', id));
 }

@@ -1,5 +1,5 @@
 import { auth } from './firebase.js';
-import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, deleteTodo, recordProductivity } from './todoService.js';
+import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, updateSortOrder, deleteTodo, recordProductivity } from './todoService.js';
 import { getUrgencyIntensity } from './settings.js';
 import { triggerCheckAnimation, triggerCascade } from './animations.js';
 
@@ -991,11 +991,19 @@ function handleDrop(draggedId, prevId, nextId) {
     if (idx !== -1) {
         currentTodos[idx].sortOrder = newSortOrder;
         currentTodos.sort((a, b) => a.sortOrder - b.sortOrder);
-        dirtyIds.add(draggedId);
-
-        const input = document.querySelector(`.todo-row[data-id="${draggedId}"] .todo-input`);
-        scheduleSave(draggedId, input);
         scheduleRender(currentTodos);
+
+        const uid = auth.currentUser?.uid;
+        if (uid) {
+            updateSaveStatus('saving');
+            updateSortOrder(uid, draggedId, newSortOrder)
+                .then(() => updateSaveStatus('idle'))
+                .catch(e => {
+                    showToast('Failed to save order', 'error');
+                    console.error(e);
+                    updateSaveStatus('error');
+                });
+        }
     }
 }
 
