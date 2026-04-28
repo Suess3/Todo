@@ -857,9 +857,8 @@ function initDragAndDrop() {
             draggedRow.classList.add('is-dragging');
             draggedRow.style.width = `${draggedRow.offsetWidth}px`;
 
-            draggedRow.parentElement.insertBefore(placeholder, draggedRow);
-
             const rect = draggedRow.getBoundingClientRect();
+            draggedRow.parentElement.insertBefore(placeholder, draggedRow);
             draggedRow.style.position = 'fixed';
             draggedRow.style.top = `${rect.top}px`;
             draggedRow.style.left = `${rect.left}px`;
@@ -943,6 +942,10 @@ function initDragAndDrop() {
 
     container.addEventListener('pointerup', endDrag);
     container.addEventListener('pointercancel', endDrag);
+
+    container.addEventListener('touchmove', (e) => {
+        if (isDragging) e.preventDefault();
+    }, { passive: false });
 }
 
 function handleDrop(draggedId, prevId, nextId) {
