@@ -851,7 +851,7 @@ function initDragAndDrop() {
             placeholder.style.height = `${draggedHeight}px`;
 
             const list = draggedRow.parentElement;
-            siblings = Array.from(list.querySelectorAll('.todo-row:not(.done)'));
+            siblings = Array.from(list.querySelectorAll('.todo-row'));
             dragStartIndex = siblings.indexOf(draggedRow);
 
             draggedRow.classList.add('is-dragging');
@@ -944,7 +944,26 @@ function initDragAndDrop() {
     container.addEventListener('pointercancel', endDrag);
 
     container.addEventListener('touchmove', (e) => {
-        if (isDragging) e.preventDefault();
+        if (!isDragging || !draggedRow) return;
+        e.preventDefault();
+
+        const clientY = e.touches[0].clientY;
+        currentY = clientY - startY;
+        draggedRow.style.transform = `translateY(${currentY}px)`;
+
+        for (let i = 0; i < siblings.length; i++) {
+            if (i === dragStartIndex) continue;
+            const sib = siblings[i];
+            const rect = sib.getBoundingClientRect();
+            const mid = rect.top + rect.height / 2;
+            if (clientY < mid) {
+                if (i < dragStartIndex) sib.style.transform = `translateY(${draggedHeight}px)`;
+                else sib.style.transform = '';
+            } else {
+                if (i > dragStartIndex) sib.style.transform = `translateY(-${draggedHeight}px)`;
+                else sib.style.transform = '';
+            }
+        }
     }, { passive: false });
 }
 
