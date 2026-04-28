@@ -822,6 +822,7 @@ function initDragAndDrop() {
     let placeholder = null;
     let startY = 0;
     let currentY = 0;
+    let lastClientY = 0;
     let dragTimeout = null;
     let siblings = [];
     let draggedHeight = 0;
@@ -947,8 +948,8 @@ function initDragAndDrop() {
         if (!isDragging || !draggedRow) return;
         e.preventDefault();
 
-        const clientY = e.touches[0].clientY;
-        currentY = clientY - startY;
+        lastClientY = e.touches[0].clientY;
+        currentY = lastClientY - startY;
         draggedRow.style.transform = `translateY(${currentY}px)`;
 
         for (let i = 0; i < siblings.length; i++) {
@@ -956,7 +957,7 @@ function initDragAndDrop() {
             const sib = siblings[i];
             const rect = sib.getBoundingClientRect();
             const mid = rect.top + rect.height / 2;
-            if (clientY < mid) {
+            if (lastClientY < mid) {
                 if (i < dragStartIndex) sib.style.transform = `translateY(${draggedHeight}px)`;
                 else sib.style.transform = '';
             } else {
@@ -965,6 +966,10 @@ function initDragAndDrop() {
             }
         }
     }, { passive: false });
+
+    container.addEventListener('touchend', () => {
+        if (isDragging) endDrag({ clientY: lastClientY, pointerId: null });
+    });
 }
 
 function handleDrop(draggedId, prevId, nextId) {
