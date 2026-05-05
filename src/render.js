@@ -2,9 +2,7 @@ import { auth } from './firebase.js';
 import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, updateSortOrder, deleteTodo, recordProductivity } from './todoService.js';
 import { getUrgencyIntensity } from './settings.js';
 import { triggerCheckAnimation, triggerCascade } from './animations.js';
-
-const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
-const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+import { t } from './i18n.js';
 const expandedStates = {};
 const dirtyIds = new Set();
 
@@ -69,6 +67,7 @@ function urgencyColor(moveCount, intensity) {
 }
 
 document.addEventListener('urgency-changed', () => renderApp(currentTodos));
+document.addEventListener('lang-changed', () => renderApp(currentTodos));
 
 function shouldAnimate(todayEpoch) {
     const last = parseInt(localStorage.getItem(ANIM_KEY) || '0');
@@ -245,11 +244,11 @@ export function scheduleRender(todos) {
 
 function formatDate(epoch) {
     const d = new Date(epoch * 86400000);
-    return d.getDate().toString().padStart(2, '0') + '. ' + MONTH_NAMES[d.getMonth()];
+    return d.getDate().toString().padStart(2, '0') + '. ' + t('month_' + d.getMonth());
 }
 
 function getDayName(epoch) {
-    return DAY_NAMES[new Date(epoch * 86400000).getDay()];
+    return t('day_' + new Date(epoch * 86400000).getDay());
 }
 
 // --- Keyboard handlers ---
@@ -718,7 +717,7 @@ function buildDaySection(dateEpoch, today, dayTodos, uid) {
     const urgencyIntensity = getUrgencyIntensity();
     dayTodos.forEach(todo => list.appendChild(createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensity)));
 
-    if (isOpen) list.appendChild(buildAddBtn(dayTodos.length === 0, 'No tasks (tap to add)', () => addTodo(uid, dateEpoch).catch(e => { showToast('Failed to create todo', 'error'); console.error(e); })));
+    if (isOpen) list.appendChild(buildAddBtn(dayTodos.length === 0, t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast('Failed to create todo', 'error'); console.error(e); })));
 
     section.appendChild(list);
     return section;
@@ -728,6 +727,11 @@ function reconcileDaySection(section, dateEpoch, today, dayTodos, uid) {
     const isPast = dateEpoch < today;
     const isToday = dateEpoch === today;
     const isOpen = expandedStates[dateEpoch] ?? !isPast;
+
+    const weekdayEl = section.querySelector('.weekday');
+    if (weekdayEl) weekdayEl.textContent = getDayName(dateEpoch);
+    const dateEl = section.querySelector('.date-small');
+    if (dateEl) dateEl.textContent = formatDate(dateEpoch);
 
     section.querySelector('.toggle-icon')?.classList.toggle('closed', !isOpen);
 
@@ -742,10 +746,10 @@ function reconcileDaySection(section, dateEpoch, today, dayTodos, uid) {
     let addBtn = list.querySelector('.tap-to-add');
     if (!isOpen && addBtn) { addBtn.remove(); addBtn = null; }
     if (isOpen && !addBtn) {
-        addBtn = buildAddBtn(dayTodos.length === 0, 'No tasks (tap to add)', () => addTodo(uid, dateEpoch).catch(e => { showToast('Failed to create todo', 'error'); console.error(e); }));
+        addBtn = buildAddBtn(dayTodos.length === 0, t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast('Failed to create todo', 'error'); console.error(e); }));
         list.appendChild(addBtn);
     }
-    if (addBtn) addBtn.textContent = dayTodos.length === 0 ? 'No tasks (tap to add)' : '';
+    if (addBtn) addBtn.textContent = dayTodos.length === 0 ? t('no_tasks') : '';
 
     reconcileRows(
         list, dayTodos, addBtn,
@@ -799,10 +803,10 @@ function reconcileFlatView(container, todos, uid) {
 
     let addBtn = list.querySelector('.tap-to-add');
     if (!addBtn) {
-        addBtn = buildAddBtn(pageTodos.length === 0, 'No items (tap to add)', () => addTodo(uid, 0, '', Date.now(), currentPage).catch(e => { showToast('Failed to create item', 'error'); console.error(e); }));
+        addBtn = buildAddBtn(pageTodos.length === 0, t('no_items'), () => addTodo(uid, 0, '', Date.now(), currentPage).catch(e => { showToast('Failed to create item', 'error'); console.error(e); }));
         list.appendChild(addBtn);
     }
-    addBtn.textContent = pageTodos.length === 0 ? 'No items (tap to add)' : '';
+    addBtn.textContent = pageTodos.length === 0 ? t('no_items') : '';
 
     reconcileRows(
         list, pageTodos, addBtn,

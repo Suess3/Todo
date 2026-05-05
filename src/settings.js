@@ -1,3 +1,5 @@
+import { getLang, setLang, applyTranslations } from './i18n.js';
+
 const THEME_KEY = 'todo-theme';
 const URGENCY_KEY = 'todo-urgency-intensity';
 const ACCENT_KEY = 'todo-accent-hue';
@@ -175,6 +177,13 @@ export function initSettings() {
         setTheme(themeToggle.checked ? 'light' : 'dark');
     });
 
+    // Language toggle (checked = DE)
+    const langToggle = document.getElementById('lang-toggle');
+    langToggle.checked = getLang() === 'de';
+    langToggle.addEventListener('change', () => {
+        setLang(langToggle.checked ? 'de' : 'en');
+    });
+
     // Urgency slider
     const urgencySlider = document.getElementById('urgency-slider');
     urgencySlider.value = getUrgencyIntensity();
@@ -260,4 +269,6 @@ export function initSettings() {
         localStorage.removeItem(BANNER_KEY);
         applyBannerPhoto();
     });
+
+    applyTranslations();
 }

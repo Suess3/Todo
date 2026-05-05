@@ -42,10 +42,10 @@
         <div id="charts-modal" class="modal-overlay hidden">
             <div class="modal-card charts-card">
                 <div class="modal-header">
-                    <span>Productivity</span>
+                    <span data-i18n="productivity">Productivity</span>
                     <button id="charts-close" class="modal-close">✕</button>
                 </div>
-                <div id="charts-loading" class="charts-loading hidden">Loading…</div>
+                <div id="charts-loading" class="charts-loading hidden" data-i18n="loading">Loading…</div>
                 <div id="charts-content" class="charts-grid hidden">
                     <div class="chart-wrap"><canvas id="week-chart"></canvas></div>
                     <div class="chart-wrap"><canvas id="alltime-chart"></canvas></div>
@@ -56,53 +56,60 @@
         <div id="settings-modal" class="modal-overlay hidden">
             <div class="modal-card">
                 <div class="modal-header">
-                    <span>Settings</span>
+                    <span data-i18n="settings">Settings</span>
                     <button id="settings-close" class="modal-close">✕</button>
                 </div>
                 <div class="setting-row">
-                    <span>Light mode</span>
+                    <span data-i18n="light_mode">Light mode</span>
                     <label class="toggle">
                         <input type="checkbox" id="theme-toggle">
                         <span class="toggle-slider"></span>
                     </label>
                 </div>
                 <div class="setting-row">
-                    <span>Urgency coloring intensity</span>
+                    <span data-i18n="language">Language</span>
+                    <label class="toggle">
+                        <input type="checkbox" id="lang-toggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="setting-row">
+                    <span data-i18n="urgency_intensity">Urgency coloring intensity</span>
                     <input type="range" id="urgency-slider" min="0" max="100" value="50" class="urgency-slider">
                 </div>
                 <div class="setting-row">
-                    <span>Main color</span>
+                    <span data-i18n="main_color">Main color</span>
                     <input type="range" id="accent-slider" min="0" max="360" value="217" class="accent-slider">
                 </div>
                 <div class="setting-row">
-                    <span>Background shade</span>
+                    <span data-i18n="bg_shade">Background shade</span>
                     <input type="range" id="bg-slider" min="0" max="100" value="0" class="urgency-slider">
                 </div>
                 <div class="setting-row setting-col">
-                    <span>Background pattern</span>
+                    <span data-i18n="bg_pattern">Background pattern</span>
                     <div class="pattern-picker" id="pattern-picker">
-                        <button class="pattern-btn active" data-pattern="none">None</button>
-                        <button class="pattern-btn" data-pattern="grain">Grain</button>
-                        <button class="pattern-btn" data-pattern="dots">Dots</button>
-                        <button class="pattern-btn" data-pattern="grid">Grid</button>
-                        <button class="pattern-btn" data-pattern="diagonal">Lines</button>
-                        <button class="pattern-btn" data-pattern="scan">Scan</button>
+                        <button class="pattern-btn active" data-pattern="none" data-i18n="pattern_none">None</button>
+                        <button class="pattern-btn" data-pattern="grain" data-i18n="pattern_grain">Grain</button>
+                        <button class="pattern-btn" data-pattern="dots" data-i18n="pattern_dots">Dots</button>
+                        <button class="pattern-btn" data-pattern="grid" data-i18n="pattern_grid">Grid</button>
+                        <button class="pattern-btn" data-pattern="diagonal" data-i18n="pattern_lines">Lines</button>
+                        <button class="pattern-btn" data-pattern="scan" data-i18n="pattern_scan">Scan</button>
                     </div>
                 </div>
                 <div class="setting-row" id="pattern-opacity-row">
-                    <span>Pattern strength</span>
+                    <span data-i18n="pattern_strength">Pattern strength</span>
                     <input type="range" id="pattern-slider" min="0" max="100" value="30" class="urgency-slider">
                 </div>
                 <div class="setting-row">
-                    <span>Background photo</span>
+                    <span data-i18n="bg_photo">Background photo</span>
                     <div class="banner-btns">
-                        <button id="banner-choose-btn" class="modal-action-btn">Choose photo</button>
-                        <button id="banner-remove-btn" class="modal-action-btn muted">Remove</button>
+                        <button id="banner-choose-btn" class="modal-action-btn" data-i18n="choose_photo">Choose photo</button>
+                        <button id="banner-remove-btn" class="modal-action-btn muted" data-i18n="remove">Remove</button>
                     </div>
                 </div>
                 <input type="file" id="banner-file-input" accept="image/*" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none">
                 <div class="setting-row">
-                    <button id="signout-btn" class="signout-btn danger">Sign out</button>
+                    <button id="signout-btn" class="signout-btn danger" data-i18n="sign_out">Sign out</button>
                 </div>
             </div>
         </div>
@@ -115,10 +122,10 @@
                 <button id="settings-btn" class="settings-btn">⚙︎</button>
             </div>
             <div id="page-tabs" class="page-tabs hidden">
-                <button class="page-tab active" data-page="todo">Todo</button>
-                <button class="page-tab" data-page="keepInMind">Notes</button>
-                <button class="page-tab" data-page="soon">Soon</button>
-                <button class="page-tab" data-page="longRun">Long run</button>
+                <button class="page-tab active" data-page="todo" data-i18n="tab_todo">Todo</button>
+                <button class="page-tab" data-page="keepInMind" data-i18n="tab_notes">Notes</button>
+                <button class="page-tab" data-page="soon" data-i18n="tab_soon">Soon</button>
+                <button class="page-tab" data-page="longRun" data-i18n="tab_longrun">Long run</button>
             </div>
         </div>
 
