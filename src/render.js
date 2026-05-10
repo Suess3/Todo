@@ -255,7 +255,10 @@ function getDayName(epoch) {
 
 // Attached once per input on creation; reads current todo state from currentTodos at event time
 // so it stays correct across reconciliation cycles without needing to be re-attached.
-function attachCalendarKeyboard(input, getDateEpoch, uid) {
+// getSiblings()                    → filtered list of todos for this view (for nav / backspace)
+// makeTempTodo(tempId, after, s)   → optimistic todo object to insert locally
+// persistTodo(after, sortOrder)    → calls addTodo with the right page/date args
+function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
     let enterInFlight = false;
 
     const onEnter = async (e) => {
@@ -265,15 +268,15 @@ function attachCalendarKeyboard(input, getDateEpoch, uid) {
         enterInFlight = true;
 
         const todoId = input.dataset.id;
-        const dateEpoch = getDateEpoch();
+        const siblings = getSiblings();
         const cursor = input.selectionStart;
         const before = input.value.slice(0, cursor);
         const after = input.value.slice(cursor);
         const idx = currentTodos.findIndex(t => t.id === todoId);
-
-        const next = currentTodos.find((t, i) => i > idx && t.dateEpochDay === dateEpoch);
+        const sibIdx = siblings.findIndex(t => t.id === todoId);
+        const nextSib = siblings[sibIdx + 1];
         const currentOrder = currentTodos[idx].sortOrder;
-        const nextOrder = next ? next.sortOrder : currentOrder + 2000;
+        const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
         const newSortOrder = (currentOrder + nextOrder) / 2;
 
         currentTodos[idx] = { ...currentTodos[idx], text: before };
@@ -283,7 +286,7 @@ function attachCalendarKeyboard(input, getDateEpoch, uid) {
         const tempId = '_pending_' + Date.now();
         currentTodos = [
             ...currentTodos.slice(0, idx + 1),
-            { id: tempId, text: after, isDone: false, dateEpochDay: dateEpoch, sortOrder: newSortOrder, moveCount: 0 },
+            makeTempTodo(tempId, after, newSortOrder),
             ...currentTodos.slice(idx + 1),
         ];
         focusTarget = { id: tempId, cursor: 0 };
@@ -291,7 +294,7 @@ function attachCalendarKeyboard(input, getDateEpoch, uid) {
 
         try {
             updateSaveStatus('saving');
-            const newDoc = await addTodo(uid, dateEpoch, after, newSortOrder);
+            const newDoc = await persistTodo(after, newSortOrder);
             updateSaveStatus('idle');
 
             // Swap temp id for real id in state and DOM — avoids a full re-render that would close mobile keyboard
@@ -301,7 +304,6 @@ function attachCalendarKeyboard(input, getDateEpoch, uid) {
         } catch (e) {
             updateSaveStatus('error');
             showToast('Failed to create todo', 'error');
-            // Remove temp todo if creation failed
             currentTodos = currentTodos.filter(t => t.id !== tempId);
             renderApp(currentTodos);
             console.error(e);
@@ -316,117 +318,7 @@ function attachCalendarKeyboard(input, getDateEpoch, uid) {
         if (e.key === 'Enter') { await onEnter(e); return; }
 
         const todoId = input.dataset.id;
-        const dateEpoch = getDateEpoch();
-
-        if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
-            e.preventDefault();
-            const idx = currentTodos.findIndex(t => t.id === todoId);
-            const prev = currentTodos.slice(0, idx).reverse().find(t => t.dateEpochDay === dateEpoch);
-
-            if (!prev && input.value === '') {
-                currentTodos = currentTodos.filter(t => t.id !== todoId);
-                dirtyIds.delete(todoId);
-                renderApp(currentTodos);
-                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
-                return;
-            }
-            if (!prev) return;
-
-            if (input.value === '') {
-                focusTarget = { id: prev.id, cursor: prev.text.length };
-                currentTodos = currentTodos.filter(t => t.id !== todoId);
-                dirtyIds.delete(todoId);
-                renderApp(currentTodos);
-                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
-            } else {
-                const mergedText = prev.text + input.value;
-                const splitCursor = prev.text.length;
-                const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
-                currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
-                dirtyIds.add(prev.id);
-                currentTodos = currentTodos.filter(t => t.id !== todoId);
-                dirtyIds.delete(todoId);
-                focusTarget = { id: prev.id, cursor: splitCursor };
-                renderApp(currentTodos);
-                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
-            }
-        }
-
-        if (e.key === 'ArrowUp' && input.selectionStart === 0) {
-            e.preventDefault();
-            const idx = currentTodos.findIndex(t => t.id === todoId);
-            const prev = currentTodos.slice(0, idx).reverse().find(t => t.dateEpochDay === dateEpoch);
-            if (prev) {
-                const el = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
-                if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
-            }
-        }
-
-        if (e.key === 'ArrowDown' && input.selectionStart === input.value.length) {
-            e.preventDefault();
-            const idx = currentTodos.findIndex(t => t.id === todoId);
-            const next = currentTodos.slice(idx + 1).find(t => t.dateEpochDay === dateEpoch);
-            if (next) {
-                const el = document.querySelector(`.todo-input[data-id="${next.id}"]`);
-                if (el) { el.focus(); el.setSelectionRange(0, 0); }
-            }
-        }
-    });
-}
-
-function attachFlatKeyboard(input, uid) {
-    let enterInFlight = false;
-
-    input.addEventListener('keydown', async (e) => {
-        const todoId = input.dataset.id;
-        // Read siblings fresh each event so ordering stays correct after adds/deletes
-        const siblings = currentTodos.filter(t => t.page === currentPage);
-
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            if (enterInFlight) return;
-            enterInFlight = true;
-
-            const cursor = input.selectionStart;
-            const before = input.value.slice(0, cursor);
-            const after = input.value.slice(cursor);
-            const idx = currentTodos.findIndex(t => t.id === todoId);
-            const sibIdx = siblings.findIndex(t => t.id === todoId);
-            const nextSib = siblings[sibIdx + 1];
-            const currentOrder = currentTodos[idx].sortOrder;
-            const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
-            const newSortOrder = (currentOrder + nextOrder) / 2;
-
-            currentTodos[idx] = { ...currentTodos[idx], text: before };
-            dirtyIds.add(todoId);
-
-            const tempId = '_pending_' + Date.now();
-            currentTodos = [
-                ...currentTodos.slice(0, idx + 1),
-                { id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage },
-                ...currentTodos.slice(idx + 1),
-            ];
-            focusTarget = { id: tempId, cursor: 0 };
-            renderApp(currentTodos);
-
-            try {
-                updateSaveStatus('saving');
-                const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage);
-                updateSaveStatus('idle');
-
-                currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-                if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
-                document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
-            } catch (e) {
-                updateSaveStatus('error');
-                showToast('Failed to create todo', 'error');
-                currentTodos = currentTodos.filter(t => t.id !== tempId);
-                renderApp(currentTodos);
-                console.error(e);
-            }
-
-            enterInFlight = false;
-        }
+        const siblings = getSiblings();
 
         if (e.key === 'Backspace' && input.selectionStart === 0 && input.selectionEnd === 0) {
             e.preventDefault();
@@ -530,7 +422,12 @@ function createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensi
     });
 
     attachBlurSave(input);
-    attachCalendarKeyboard(input, () => dateEpoch, uid);
+    attachKeyboard(
+        input, uid,
+        () => currentTodos.filter(t => t.dateEpochDay === dateEpoch),
+        (tempId, after, s) => ({ id: tempId, text: after, isDone: false, dateEpochDay: dateEpoch, sortOrder: s, moveCount: 0 }),
+        (after, s) => addTodo(uid, dateEpoch, after, s)
+    );
 
     row.appendChild(input);
     return row;
@@ -580,7 +477,12 @@ function createFlatRow(todo, uid) {
     });
 
     attachBlurSave(input);
-    attachFlatKeyboard(input, uid);
+    attachKeyboard(
+        input, uid,
+        () => currentTodos.filter(t => t.page === currentPage),
+        (tempId, after, s) => ({ id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: s, moveCount: 0, page: currentPage }),
+        (after, s) => addTodo(uid, 0, after, s, currentPage)
+    );
 
     requestAnimationFrame(autoGrow);
     row.appendChild(input);

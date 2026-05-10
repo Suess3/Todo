@@ -67,15 +67,19 @@ export async function toggleTodo(uid, id, newState) {
 
 export async function cleanupNotes(uid) {
     const oneDayAgo = Date.now() - 86400000;
-    const q = query(todosRef(uid), where('page', '==', 'keepInMind'), where('isDone', '==', true));
-    const snapshot = await getDocs(q);
     const batch = writeBatch(db);
-    snapshot.docs.forEach(d => {
-        const { completedAt } = d.data();
-        if (completedAt && completedAt < oneDayAgo) {
-            batch.delete(d.ref);
-        }
-    });
+
+    for (const page of ['keepInMind', 'soon']) {
+        const q = query(todosRef(uid), where('page', '==', page), where('isDone', '==', true));
+        const snapshot = await getDocs(q);
+        snapshot.docs.forEach(d => {
+            const { completedAt } = d.data();
+            if (completedAt && completedAt < oneDayAgo) {
+                batch.delete(d.ref);
+            }
+        });
+    }
+
     await batch.commit();
 }
 
