@@ -84,10 +84,10 @@ async function typeInputs(inputs) {
         const fullText = input.dataset.fullText || '';
         input.value = '';
         for (const char of fullText) {
-            await new Promise(r => setTimeout(r, 38));
+            await new Promise(r => setTimeout(r, 12));
             input.value += char;
         }
-        await new Promise(r => setTimeout(r, 80)); // pause between todos
+        await new Promise(r => setTimeout(r, 30)); // pause between todos
     }
     isAnimating = false;
 }
