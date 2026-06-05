@@ -9,8 +9,22 @@ import {
 let suppressAuthChange = false;
 
 export function initAuth(onSignIn, onSignOut) {
+    let initialResolved = false;
+
+    // Lie-Fi fallback: on bad connections Firebase waits for a token refresh that never
+    // completes, blocking onAuthStateChanged indefinitely. After 5s we use whatever
+    // auth state is already cached locally in IndexedDB.
+    const fallbackTimer = setTimeout(() => {
+        if (initialResolved) return;
+        initialResolved = true;
+        if (auth.currentUser) onSignIn(auth.currentUser);
+        else onSignOut();
+    }, 5000);
+
     onAuthStateChanged(auth, user => {
         if (suppressAuthChange) return;
+        clearTimeout(fallbackTimer);
+        initialResolved = true;
         if (user) onSignIn(user);
         else onSignOut();
     });
