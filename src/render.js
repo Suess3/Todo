@@ -10,6 +10,7 @@ let currentTodos = [];
 let focusTarget = null; // { id, cursor } — focus a specific input after next render
 let currentPage = 'todo';
 let isAnimating = false;
+let animationCancelToken = null;
 
 const ANIM_KEY = 'todo-animated-day';
 const saveTimers = new Map();
@@ -78,18 +79,39 @@ function markAnimated(todayEpoch) {
     localStorage.setItem(ANIM_KEY, String(todayEpoch));
 }
 
+function cancelTypingAnimation() {
+    if (!animationCancelToken) return;
+    animationCancelToken.cancelled = true;
+    animationCancelToken = null;
+    isAnimating = false;
+    document.querySelectorAll('.todo-input[data-full-text]').forEach(el => {
+        el.value = el.dataset.fullText;
+        el.removeAttribute('data-full-text');
+    });
+}
+
 async function typeInputs(inputs) {
+    const token = { cancelled: false };
+    animationCancelToken = token;
     isAnimating = true;
     for (const input of inputs) {
+        if (token.cancelled) break;
         const fullText = input.dataset.fullText || '';
         input.value = '';
         for (const char of fullText) {
+            if (token.cancelled) break;
             await new Promise(r => setTimeout(r, 12));
+            if (token.cancelled) break;
             input.value += char;
         }
-        await new Promise(r => setTimeout(r, 30)); // pause between todos
+        if (token.cancelled) break;
+        await new Promise(r => setTimeout(r, 30));
     }
-    isAnimating = false;
+    if (!token.cancelled) {
+        isAnimating = false;
+        animationCancelToken = null;
+        renderApp(currentTodos);
+    }
 }
 
 // --- Checkbox ---
@@ -190,7 +212,7 @@ function attachBlurSave(input) {
 // --- Public API ---
 
 export function setPage(page) {
-    isAnimating = false;
+    cancelTypingAnimation();
     currentPage = page;
     renderApp(currentTodos);
 }
@@ -897,7 +919,7 @@ function handleDrop(draggedId, prevId, nextId) {
     if (idx !== -1) {
         currentTodos[idx].sortOrder = newSortOrder;
         currentTodos.sort((a, b) => a.sortOrder - b.sortOrder);
-        scheduleRender(currentTodos);
+        renderApp(currentTodos);
 
         const uid = auth.currentUser?.uid;
         if (uid) {
@@ -914,3 +936,8 @@ function handleDrop(draggedId, prevId, nextId) {
 }
 
 initDragAndDrop();
+
+// Cancel typing animation on any user interaction so the UI stays fully responsive
+document.addEventListener('pointerdown', () => {
+    if (isAnimating) cancelTypingAnimation();
+}, { capture: true });
