@@ -923,10 +923,17 @@ function handleDrop(draggedId, prevId, nextId) {
 
         const uid = auth.currentUser?.uid;
         if (uid) {
+            // Protect against scheduleRender overwriting the optimistic order with a
+            // stale snapshot that arrives before this write has propagated (snap-back)
+            dirtyIds.add(draggedId);
             updateSaveStatus('saving');
             updateSortOrder(uid, draggedId, newSortOrder)
-                .then(() => updateSaveStatus('idle'))
+                .then(() => {
+                    dirtyIds.delete(draggedId);
+                    updateSaveStatus('idle');
+                })
                 .catch(e => {
+                    dirtyIds.delete(draggedId);
                     showToast('Failed to save order', 'error');
                     console.error(e);
                     updateSaveStatus('error');
