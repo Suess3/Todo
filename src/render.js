@@ -1245,10 +1245,7 @@ function closeRowMenu() {
     if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
 }
 
-// alwaysAbove: used by the mobile docked bar, where the bar sits right above the keyboard —
-// window.innerHeight doesn't shrink for the keyboard on iOS, so the normal space-below check
-// would misjudge there's room below and place the menu behind the keyboard.
-function openRowMenu(e, todo, uid, { alwaysAbove = false } = {}) {
+function openRowMenu(e, todo, uid) {
     e.stopPropagation();
     closeRowMenu();
 
@@ -1269,7 +1266,7 @@ function openRowMenu(e, todo, uid, { alwaysAbove = false } = {}) {
     document.body.appendChild(menu);
     const rect = e.currentTarget.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const top = (!alwaysAbove && spaceBelow >= menu.offsetHeight + 8) ? rect.bottom + 4 : rect.top - menu.offsetHeight - 4;
+    const top = spaceBelow >= menu.offsetHeight + 8 ? rect.bottom + 4 : rect.top - menu.offsetHeight - 4;
     menu.style.left = `${rect.left}px`;
     menu.style.top = `${Math.max(4, top)}px`;
 
@@ -1511,45 +1508,59 @@ function initMobileNotesBar() {
     let bar = null;
     let focusedNoteId = null;
 
-    function buildPlusButtons() {
+    // Prefer the live focused input's id — focusedNoteId can hold a temp id that was
+    // swapped for the real one while the input stayed focused
+    function focusedTodo() {
+        const active = document.activeElement;
+        const id = active?.classList?.contains('todo-input') ? active.dataset.id : focusedNoteId;
+        return currentTodos.find(t => t.id === id);
+    }
+
+    // All bar buttons preventDefault on mousedown: keeps the input focused (and the
+    // keyboard open) through the tap, and any text selection alive for execCommand
+    function barButton(label, className, onClick) {
         const btn = document.createElement('div');
-        btn.className = 'mobile-notes-bar-btn';
-        btn.textContent = '+';
-        // Keep the input focused (and keyboard open) through the tap
+        btn.className = className;
+        btn.textContent = label;
         btn.addEventListener('mousedown', (e) => e.preventDefault());
-        btn.addEventListener('click', (e) => {
-            // Prefer the live focused input's id — focusedNoteId can hold a temp id that was
-            // swapped for the real one while the input stayed focused
-            const active = document.activeElement;
-            const id = active?.classList?.contains('todo-input') ? active.dataset.id : focusedNoteId;
-            const todo = currentTodos.find(t => t.id === id);
-            const uid = auth.currentUser?.uid;
-            if (todo && uid) openRowMenu({ currentTarget: e.currentTarget, stopPropagation() {} }, todo, uid, { alwaysAbove: true });
-        });
-        return [btn];
+        btn.addEventListener('click', onClick);
+        return btn;
+    }
+
+    function buildPlusButtons() {
+        return [barButton('+', 'mobile-notes-bar-btn', () => setMode('menu'))];
+    }
+
+    // The bar itself becomes the menu (Notion-style) — no popup above it
+    function buildMenuButtons() {
+        return [
+            barButton('×', 'mobile-notes-bar-btn', () => setMode('plus')),
+            barButton(t('toggle_list'), 'mobile-notes-bar-btn mobile-notes-bar-option', () => {
+                const todo = focusedTodo();
+                const uid = auth.currentUser?.uid;
+                if (todo && uid) convertRowToToggle(todo, uid);
+                setMode('plus');
+            }),
+        ];
     }
 
     function buildFormatButtons() {
-        return [['bold', 'B'], ['italic', 'I'], ['underline', 'U']].map(([cmd, label]) => {
-            const btn = document.createElement('div');
-            btn.className = `mobile-notes-bar-btn format-${cmd}`;
-            btn.textContent = label;
-            // Keep the text selection alive through the tap so execCommand has something to act on
-            btn.addEventListener('mousedown', (e) => e.preventDefault());
-            btn.addEventListener('click', () => {
+        return [['bold', 'B'], ['italic', 'I'], ['underline', 'U']].map(([cmd, label]) =>
+            barButton(label, `mobile-notes-bar-btn format-${cmd}`, () => {
                 const active = document.activeElement;
                 document.execCommand(cmd);
                 active?.dispatchEvent(new Event('input', { bubbles: true }));
-            });
-            return btn;
-        });
+            })
+        );
     }
+
+    const MODE_BUILDERS = { plus: buildPlusButtons, menu: buildMenuButtons, format: buildFormatButtons };
 
     function setMode(mode) {
         if (!bar || bar.dataset.mode === mode) return;
         bar.dataset.mode = mode;
         bar.innerHTML = '';
-        (mode === 'format' ? buildFormatButtons() : buildPlusButtons()).forEach(el => bar.appendChild(el));
+        MODE_BUILDERS[mode]().forEach(el => bar.appendChild(el));
     }
 
     function ensureBar() {
@@ -1590,7 +1601,9 @@ function initMobileNotesBar() {
         if (!bar || !bar.classList.contains('visible') || !isMobileViewport()) return;
         const sel = window.getSelection();
         const hasSelection = !!sel && !sel.isCollapsed && sel.rangeCount > 0;
-        setMode(hasSelection ? 'format' : 'plus');
+        if (hasSelection) setMode('format');
+        // Only demote from format — a collapsed selection must not close an open menu
+        else if (bar.dataset.mode === 'format') setMode('plus');
     });
 
     if (window.visualViewport) {
