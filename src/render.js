@@ -797,14 +797,58 @@ function attachNoteKeyboard(input, uid) {
             if (idx === -1) return;
             const current = currentTodos[idx];
             const { before, after } = splitContentEditableAtCursor(input);
+            const siblings = getSiblings();
+            const sibIdx = siblings.findIndex(t => t.id === todoId);
+
+            if (before === '') {
+                // Cursor was at the very start: insert an empty sibling BEFORE this row instead of
+                // splitting its text off into a new row. Keeping current's id (and thus its children,
+                // if it's a toggle) in place is what stops a toggle's header + children from getting
+                // orphaned onto a brand new id when there's nothing to its left to begin with.
+                const prevSib = siblings[sibIdx - 1];
+                const currentOrder = current.sortOrder;
+                const prevOrder = prevSib ? prevSib.sortOrder : currentOrder - 2000;
+                const newSortOrder = (prevOrder + currentOrder) / 2;
+                const parentId = current.parentId || null;
+
+                const tempId = '_pending_' + Date.now();
+                currentTodos = [
+                    ...currentTodos.slice(0, idx),
+                    { id: tempId, text: '', isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId, isToggle: current.isToggle, collapsed: current.isToggle ? true : false },
+                    ...currentTodos.slice(idx),
+                ];
+                focusTarget = { id: todoId, cursor: 'start' };
+                renderApp(currentTodos);
+
+                try {
+                    updateSaveStatus('saving');
+                    const newDoc = await addTodo(uid, 0, '', newSortOrder, currentPage, parentId);
+                    updateSaveStatus('idle');
+                    if (current.isToggle) {
+                        await Promise.all([
+                            setIsToggle(uid, newDoc.id, true),
+                            setCollapsed(uid, newDoc.id, true),
+                        ]).catch(err => console.error(err));
+                    }
+                    currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
+                    document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+                } catch (err) {
+                    updateSaveStatus('error');
+                    showToast('Failed to create todo', 'error');
+                    currentTodos = currentTodos.filter(t => t.id !== tempId);
+                    renderApp(currentTodos);
+                    console.error(err);
+                }
+                return;
+            }
 
             // Enter on a toggle's own header creates its first/next child; anywhere else creates a sibling
             const isChildInsert = current.isToggle;
             const insertSiblings = isChildInsert
                 ? currentTodos.filter(t => t.page === currentPage && t.parentId === current.id).sort((a, b) => a.sortOrder - b.sortOrder)
-                : getSiblings();
-            const sibIdx = insertSiblings.findIndex(t => t.id === todoId);
-            const nextSib = insertSiblings[sibIdx + 1];
+                : siblings;
+            const insertSibIdx = insertSiblings.findIndex(t => t.id === todoId);
+            const nextSib = insertSiblings[insertSibIdx + 1];
             const currentOrder = current.sortOrder;
             const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
             const newSortOrder = (currentOrder + nextOrder) / 2;

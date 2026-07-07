@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todo-v92';
+const CACHE_NAME = 'todo-v93';
 
 const PRECACHE = [
     './',
