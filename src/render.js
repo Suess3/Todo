@@ -478,6 +478,13 @@ function createFlatRow(todo, uid) {
     row.className = `todo-row${todo.isDone ? ' done' : ''}`;
     row.dataset.id = todo.id;
 
+    if (currentPage === 'soon' || currentPage === 'longRun') {
+        const dragHandle = document.createElement('div');
+        dragHandle.className = 'drag-handle';
+        dragHandle.innerHTML = '⋮⋮';
+        row.appendChild(dragHandle);
+    }
+
     row.appendChild(createCheckbox(uid, todo.isDone));
 
     const input = document.createElement('textarea');
