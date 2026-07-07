@@ -300,49 +300,54 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
         if (enterInFlight) return;
         enterInFlight = true;
 
-        const todoId = input.dataset.id;
-        const siblings = getSiblings();
-        const cursor = input.selectionStart;
-        const before = input.value.slice(0, cursor);
-        const after = input.value.slice(cursor);
-        const idx = currentTodos.findIndex(t => t.id === todoId);
-        const sibIdx = siblings.findIndex(t => t.id === todoId);
-        const nextSib = siblings[sibIdx + 1];
-        const currentOrder = currentTodos[idx].sortOrder;
-        const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
-        const newSortOrder = (currentOrder + nextOrder) / 2;
-
-        currentTodos[idx] = { ...currentTodos[idx], text: before };
-        dirtyIds.add(todoId);
-
-        // Optimistic: insert temp todo locally so focus lands immediately
-        const tempId = '_pending_' + Date.now();
-        currentTodos = [
-            ...currentTodos.slice(0, idx + 1),
-            makeTempTodo(tempId, after, newSortOrder),
-            ...currentTodos.slice(idx + 1),
-        ];
-        focusTarget = { id: tempId, cursor: 0 };
-        renderApp(currentTodos);
-
+        // Wrapped in try/finally so any unexpected error can never leave enterInFlight stuck
+        // true — which would silently make Enter a no-op on this row forever after.
         try {
-            updateSaveStatus('saving');
-            const newDoc = await persistTodo(after, newSortOrder);
-            updateSaveStatus('idle');
+            const todoId = input.dataset.id;
+            const siblings = getSiblings();
+            const cursor = input.selectionStart;
+            const before = input.value.slice(0, cursor);
+            const after = input.value.slice(cursor);
+            const idx = currentTodos.findIndex(t => t.id === todoId);
+            if (idx === -1) return;
+            const sibIdx = siblings.findIndex(t => t.id === todoId);
+            const nextSib = siblings[sibIdx + 1];
+            const currentOrder = currentTodos[idx].sortOrder;
+            const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
+            const newSortOrder = (currentOrder + nextOrder) / 2;
 
-            // Swap temp id for real id in state and DOM — avoids a full re-render that would close mobile keyboard
-            currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-            if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
-            document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
-        } catch (e) {
-            updateSaveStatus('error');
-            showToast('Failed to create todo', 'error');
-            currentTodos = currentTodos.filter(t => t.id !== tempId);
+            currentTodos[idx] = { ...currentTodos[idx], text: before };
+            dirtyIds.add(todoId);
+
+            // Optimistic: insert temp todo locally so focus lands immediately
+            const tempId = '_pending_' + Date.now();
+            currentTodos = [
+                ...currentTodos.slice(0, idx + 1),
+                makeTempTodo(tempId, after, newSortOrder),
+                ...currentTodos.slice(idx + 1),
+            ];
+            focusTarget = { id: tempId, cursor: 0 };
             renderApp(currentTodos);
-            console.error(e);
-        }
 
-        enterInFlight = false;
+            try {
+                updateSaveStatus('saving');
+                const newDoc = await persistTodo(after, newSortOrder);
+                updateSaveStatus('idle');
+
+                // Swap temp id for real id in state and DOM — avoids a full re-render that would close mobile keyboard
+                currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
+                if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
+                document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+            } catch (e) {
+                updateSaveStatus('error');
+                showToast('Failed to create todo', 'error');
+                currentTodos = currentTodos.filter(t => t.id !== tempId);
+                renderApp(currentTodos);
+                console.error(e);
+            }
+        } finally {
+            enterInFlight = false;
+        }
     };
 
     // keypress is a fallback for Android keyboards that don't fire keydown on text inputs
@@ -698,6 +703,36 @@ function placeCaretAtEnd(el) {
     sel.addRange(range);
 }
 
+// Places the caret at a plain-text character offset, walking text nodes so it lands correctly
+// regardless of any <b>/<i>/<u> tags in between.
+function placeCaretAtTextOffset(el, offset) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+    let remaining = offset;
+    let node = walker.nextNode();
+    while (node) {
+        if (remaining <= node.textContent.length) {
+            const range = document.createRange();
+            range.setStart(node, remaining);
+            range.collapse(true);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            return;
+        }
+        remaining -= node.textContent.length;
+        node = walker.nextNode();
+    }
+    placeCaretAtEnd(el);
+}
+
+// Visible-character length of an HTML snippet, ignoring tags — used to find the exact join
+// point when merging two notes so the cursor can land there instead of at the very end.
+function plainTextLength(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent.length;
+}
+
 // Splits el's content at the current cursor position: mutates el down to the "before" half
 // (removing everything after the cursor) and returns both halves as HTML strings.
 function splitContentEditableAtCursor(el) {
@@ -728,56 +763,62 @@ function attachNoteKeyboard(input, uid, todo) {
         if (enterInFlight) return;
         enterInFlight = true;
 
-        const todoId = input.dataset.id;
-        const idx = currentTodos.findIndex(t => t.id === todoId);
-        const current = currentTodos[idx];
-        const { before, after } = splitContentEditableAtCursor(input);
-
-        // Enter on a toggle's own header creates its first/next child; anywhere else creates a sibling
-        const isChildInsert = current.isToggle;
-        const insertSiblings = isChildInsert
-            ? currentTodos.filter(t => t.page === currentPage && t.parentId === current.id).sort((a, b) => a.sortOrder - b.sortOrder)
-            : getSiblings();
-        const sibIdx = insertSiblings.findIndex(t => t.id === todoId);
-        const nextSib = insertSiblings[sibIdx + 1];
-        const currentOrder = current.sortOrder;
-        const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
-        const newSortOrder = (currentOrder + nextOrder) / 2;
-        const parentId = isChildInsert ? current.id : (current.parentId || null);
-
-        currentTodos[idx] = { ...current, text: before };
-        dirtyIds.add(todoId);
-
-        if (isChildInsert && current.collapsed) {
-            currentTodos[idx] = { ...currentTodos[idx], collapsed: false };
-            setCollapsed(uid, todoId, false).catch(err => console.error(err));
-        }
-
-        const tempId = '_pending_' + Date.now();
-        currentTodos = [
-            ...currentTodos.slice(0, idx + 1),
-            { id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId },
-            ...currentTodos.slice(idx + 1),
-        ];
-        focusTarget = { id: tempId, cursor: 'start' };
-        renderApp(currentTodos);
-
+        // Wrapped in try/finally so any unexpected error (e.g. todoId no longer present in
+        // currentTodos) can never leave enterInFlight stuck true — which would silently make
+        // Enter a no-op on this row forever after.
         try {
-            updateSaveStatus('saving');
-            const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage, parentId);
-            updateSaveStatus('idle');
-            currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-            if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
-            document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
-        } catch (err) {
-            updateSaveStatus('error');
-            showToast('Failed to create todo', 'error');
-            currentTodos = currentTodos.filter(t => t.id !== tempId);
-            renderApp(currentTodos);
-            console.error(err);
-        }
+            const todoId = input.dataset.id;
+            const idx = currentTodos.findIndex(t => t.id === todoId);
+            if (idx === -1) return;
+            const current = currentTodos[idx];
+            const { before, after } = splitContentEditableAtCursor(input);
 
-        enterInFlight = false;
+            // Enter on a toggle's own header creates its first/next child; anywhere else creates a sibling
+            const isChildInsert = current.isToggle;
+            const insertSiblings = isChildInsert
+                ? currentTodos.filter(t => t.page === currentPage && t.parentId === current.id).sort((a, b) => a.sortOrder - b.sortOrder)
+                : getSiblings();
+            const sibIdx = insertSiblings.findIndex(t => t.id === todoId);
+            const nextSib = insertSiblings[sibIdx + 1];
+            const currentOrder = current.sortOrder;
+            const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
+            const newSortOrder = (currentOrder + nextOrder) / 2;
+            const parentId = isChildInsert ? current.id : (current.parentId || null);
+
+            currentTodos[idx] = { ...current, text: before };
+            dirtyIds.add(todoId);
+
+            if (isChildInsert && current.collapsed) {
+                currentTodos[idx] = { ...currentTodos[idx], collapsed: false };
+                setCollapsed(uid, todoId, false).catch(err => console.error(err));
+            }
+
+            const tempId = '_pending_' + Date.now();
+            currentTodos = [
+                ...currentTodos.slice(0, idx + 1),
+                { id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId },
+                ...currentTodos.slice(idx + 1),
+            ];
+            focusTarget = { id: tempId, cursor: 'start' };
+            renderApp(currentTodos);
+
+            try {
+                updateSaveStatus('saving');
+                const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage, parentId);
+                updateSaveStatus('idle');
+                currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
+                if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
+                document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+            } catch (err) {
+                updateSaveStatus('error');
+                showToast('Failed to create todo', 'error');
+                currentTodos = currentTodos.filter(t => t.id !== tempId);
+                renderApp(currentTodos);
+                console.error(err);
+            }
+        } finally {
+            enterInFlight = false;
+        }
     };
 
     // beforeinput is the reliable way to catch Enter in contenteditable on Android (mirrors the
@@ -815,6 +856,7 @@ function attachNoteKeyboard(input, uid, todo) {
                 deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
             } else {
                 const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
+                const splitOffset = plainTextLength(prev.text);
                 const mergedText = prev.text + input.innerHTML;
                 currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
                 dirtyIds.add(prev.id);
@@ -825,7 +867,9 @@ function attachNoteKeyboard(input, uid, todo) {
                 promoteChildren(uid, todoId);
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
-                focusTarget = { id: prev.id, cursor: 'end' };
+                // Land the cursor at the join point (where the deleted line used to start),
+                // not at the very end of the merged text
+                focusTarget = { id: prev.id, cursor: splitOffset };
                 renderApp(currentTodos);
                 deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
             }
@@ -948,7 +992,9 @@ export function renderApp(todos) {
         if (el) {
             el.focus();
             if (el.isContentEditable) {
-                if (focusTarget.cursor === 'end') placeCaretAtEnd(el); else placeCaretAtStart(el);
+                if (focusTarget.cursor === 'end') placeCaretAtEnd(el);
+                else if (focusTarget.cursor === 'start') placeCaretAtStart(el);
+                else placeCaretAtTextOffset(el, focusTarget.cursor);
             } else {
                 el.setSelectionRange(focusTarget.cursor, focusTarget.cursor);
             }

@@ -544,6 +544,14 @@ body {
     min-height: 1.4em;
 }
 
+/* 'IM Fell English' has no real bold face (Google Fonts only serves its regular weight),
+   so browser-synthesized bold barely shows — reinforce it with a text stroke */
+.flat-list .todo-input[contenteditable="true"] b,
+.flat-list .todo-input[contenteditable="true"] strong {
+    font-weight: bold;
+    -webkit-text-stroke: 0.5px currentColor;
+}
+
 .flat-list.todo-list {
     gap: 0;
 }
