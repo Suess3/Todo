@@ -842,8 +842,11 @@ function attachNoteKeyboard(input, uid) {
                 return;
             }
 
-            // Enter on a toggle's own header creates its first/next child; anywhere else creates a sibling
-            const isChildInsert = current.isToggle;
+            // Enter on an EXPANDED toggle's own header creates its first/next child. A collapsed
+            // toggle has no visible children to "add to", so it's treated as a normal sibling split
+            // instead — the new row inherits isToggle so splitting a toggle produces two toggles.
+            const isChildInsert = current.isToggle && !current.collapsed;
+            const newIsToggle = !isChildInsert && current.isToggle;
             const insertSiblings = isChildInsert
                 ? currentTodos.filter(t => t.page === currentPage && t.parentId === current.id).sort((a, b) => a.sortOrder - b.sortOrder)
                 : siblings;
@@ -861,15 +864,10 @@ function attachNoteKeyboard(input, uid) {
             // the reconcile below skip it, same as the merge case)
             input.innerHTML = before;
 
-            if (isChildInsert && current.collapsed) {
-                currentTodos[idx] = { ...currentTodos[idx], collapsed: false };
-                setCollapsed(uid, todoId, false).catch(err => console.error(err));
-            }
-
             const tempId = '_pending_' + Date.now();
             currentTodos = [
                 ...currentTodos.slice(0, idx + 1),
-                { id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId },
+                { id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId, isToggle: newIsToggle, collapsed: newIsToggle ? true : false },
                 ...currentTodos.slice(idx + 1),
             ];
             focusTarget = { id: tempId, cursor: 'start' };
@@ -879,6 +877,12 @@ function attachNoteKeyboard(input, uid) {
                 updateSaveStatus('saving');
                 const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage, parentId);
                 updateSaveStatus('idle');
+                if (newIsToggle) {
+                    await Promise.all([
+                        setIsToggle(uid, newDoc.id, true),
+                        setCollapsed(uid, newDoc.id, true),
+                    ]).catch(err => console.error(err));
+                }
                 currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
                 if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
                 document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
