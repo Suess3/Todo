@@ -407,10 +407,11 @@ body {
     justify-content: flex-end;
     align-items: center;
     padding: 8px 16px;
-    gap: 20px;
+    gap: 12px;
     background: var(--bg);
     border-top: 1px solid var(--border-subtle);
     z-index: 1600;
+    overflow-x: auto;
 }
 .mobile-notes-bar.visible {
     display: flex;
@@ -422,10 +423,21 @@ body {
     cursor: pointer;
     user-select: none;
     -webkit-user-select: none;
+    flex-shrink: 0;
 }
 /* Menu entries shown when the bar turns into the row menu */
 .mobile-notes-bar-option {
     font-size: 16px;
+}
+
+.mobile-color-swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    padding: 0;
+}
+.mobile-color-swatch.is-default {
+    border: 1px solid var(--border-subtle);
 }
 
 /* Selection format toolbar (Notes: bold / italic / underline) */
@@ -461,6 +473,21 @@ body {
 .format-bold { font-weight: bold; }
 .format-italic { font-style: italic; }
 .format-underline { text-decoration: underline; }
+.format-color-trigger { font-weight: bold; }
+
+.format-color-swatch {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.format-color-swatch:hover {
+    outline: 2px solid var(--border);
+}
+.format-color-swatch.is-default {
+    border: 1px solid var(--border-subtle);
+}
 
 /* Toggle list caret */
 .toggle-caret {

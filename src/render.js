@@ -979,40 +979,90 @@ function isMobileViewport() {
     return window.matchMedia('(max-width: 768px)').matches;
 }
 
-// --- Selection format toolbar (Notes: bold / italic / underline, desktop only — see initMobileNotesBar) ---
+// --- Selection format toolbar (Notes: bold / italic / underline / color, desktop only — see initMobileNotesBar) ---
+
+// value: null means "default" (reset to the theme's normal text color)
+const NOTE_COLORS = [
+    { name: 'default', value: null },
+    { name: 'gray', value: '#9B9A97' },
+    { name: 'orange', value: '#D9730D' },
+    { name: 'yellow', value: '#CB912F' },
+    { name: 'green', value: '#448361' },
+    { name: 'blue', value: '#337EA9' },
+    { name: 'purple', value: '#9065B0' },
+    { name: 'red', value: '#D44C47' },
+];
+
+function applyTextColor(color) {
+    // Read from body, not documentElement — [data-theme] is set on <body>, so that's where the
+    // live (theme-correct) value of --text actually resolves
+    const value = color || getComputedStyle(document.body).getPropertyValue('--text').trim();
+    const active = document.activeElement;
+    document.execCommand('foreColor', false, value);
+    active?.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// All format-toolbar/color-swatch buttons preventDefault on mousedown — that's the event whose
+// default action collapses the text selection, so keeping it alive is what lets execCommand act on it
+function formatBarButton(label, className, onClick) {
+    const btn = document.createElement('div');
+    btn.className = className;
+    btn.textContent = label;
+    btn.addEventListener('mousedown', (e) => e.preventDefault());
+    btn.addEventListener('click', onClick);
+    return btn;
+}
 
 let formatToolbarEl = null;
+let formatToolbarRect = null;
 
 function hideFormatToolbar() {
     if (formatToolbarEl) { formatToolbarEl.remove(); formatToolbarEl = null; }
+    formatToolbarRect = null;
+}
+
+function positionFormatToolbar(bar, rect) {
+    const top = rect.top - bar.offsetHeight - 8;
+    const left = rect.left + rect.width / 2 - bar.offsetWidth / 2;
+    bar.style.top = `${Math.max(4, top)}px`;
+    bar.style.left = `${Math.max(4, left)}px`;
+}
+
+function renderFormatToolbarMain(bar) {
+    bar.innerHTML = '';
+    [['bold', 'B'], ['italic', 'I'], ['underline', 'U']].forEach(([cmd, label]) => {
+        bar.appendChild(formatBarButton(label, `format-btn format-${cmd}`, () => {
+            const active = document.activeElement;
+            document.execCommand(cmd);
+            active?.dispatchEvent(new Event('input', { bubbles: true }));
+        }));
+    });
+    bar.appendChild(formatBarButton('A', 'format-btn format-color-trigger', () => renderFormatToolbarColors(bar)));
+    positionFormatToolbar(bar, formatToolbarRect);
+}
+
+function renderFormatToolbarColors(bar) {
+    bar.innerHTML = '';
+    bar.appendChild(formatBarButton('‹', 'format-btn', () => renderFormatToolbarMain(bar)));
+    NOTE_COLORS.forEach(({ name, value }) => {
+        const swatch = document.createElement('div');
+        swatch.className = `format-color-swatch${value ? '' : ' is-default'}`;
+        swatch.style.background = value || 'var(--text)';
+        swatch.title = name;
+        swatch.addEventListener('mousedown', (e) => e.preventDefault());
+        swatch.addEventListener('click', () => { applyTextColor(value); hideFormatToolbar(); });
+        bar.appendChild(swatch);
+    });
+    positionFormatToolbar(bar, formatToolbarRect);
 }
 
 function showFormatToolbar(rect) {
     hideFormatToolbar();
     const bar = document.createElement('div');
     bar.className = 'format-toolbar';
-
-    [['bold', 'B'], ['italic', 'I'], ['underline', 'U']].forEach(([cmd, label]) => {
-        const btn = document.createElement('div');
-        btn.className = `format-btn format-${cmd}`;
-        btn.textContent = label;
-        // Keep the text selection alive through the tap so execCommand has something to act on.
-        // Must be mousedown, not pointerdown — mousedown's default action is what actually
-        // collapses the selection/moves focus, and preventing pointerdown alone doesn't stop that.
-        btn.addEventListener('mousedown', (e) => e.preventDefault());
-        btn.addEventListener('click', () => {
-            const active = document.activeElement;
-            document.execCommand(cmd);
-            active?.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-        bar.appendChild(btn);
-    });
-
     document.body.appendChild(bar);
-    const top = rect.top - bar.offsetHeight - 8;
-    const left = rect.left + rect.width / 2 - bar.offsetWidth / 2;
-    bar.style.top = `${Math.max(4, top)}px`;
-    bar.style.left = `${Math.max(4, left)}px`;
+    formatToolbarRect = rect;
+    renderFormatToolbarMain(bar);
     formatToolbarEl = bar;
 }
 
@@ -1593,16 +1643,32 @@ function initMobileNotesBar() {
     }
 
     function buildFormatButtons() {
-        return [['bold', 'B'], ['italic', 'I'], ['underline', 'U']].map(([cmd, label]) =>
+        const buttons = [['bold', 'B'], ['italic', 'I'], ['underline', 'U']].map(([cmd, label]) =>
             barButton(label, `mobile-notes-bar-btn format-${cmd}`, () => {
                 const active = document.activeElement;
                 document.execCommand(cmd);
                 active?.dispatchEvent(new Event('input', { bubbles: true }));
             })
         );
+        buttons.push(barButton('A', 'mobile-notes-bar-btn format-color-trigger', () => setMode('color')));
+        return buttons;
     }
 
-    const MODE_BUILDERS = { plus: buildPlusButtons, menu: buildMenuButtons, format: buildFormatButtons };
+    function buildColorButtons() {
+        const buttons = [barButton('‹', 'mobile-notes-bar-btn', () => setMode('format'))];
+        NOTE_COLORS.forEach(({ name, value }) => {
+            const swatch = document.createElement('div');
+            swatch.className = `mobile-notes-bar-btn mobile-color-swatch${value ? '' : ' is-default'}`;
+            swatch.style.background = value || 'var(--text)';
+            swatch.title = name;
+            swatch.addEventListener('mousedown', (e) => e.preventDefault());
+            swatch.addEventListener('click', () => { applyTextColor(value); setMode('format'); });
+            buttons.push(swatch);
+        });
+        return buttons;
+    }
+
+    const MODE_BUILDERS = { plus: buildPlusButtons, menu: buildMenuButtons, format: buildFormatButtons, color: buildColorButtons };
 
     function setMode(mode) {
         if (!bar || bar.dataset.mode === mode) return;
@@ -1649,7 +1715,8 @@ function initMobileNotesBar() {
         if (!bar || !bar.classList.contains('visible') || !isMobileViewport()) return;
         const sel = window.getSelection();
         const hasSelection = !!sel && !sel.isCollapsed && sel.rangeCount > 0;
-        if (hasSelection) setMode('format');
+        // Don't stomp an open color picker back to the plain format row
+        if (hasSelection) { if (bar.dataset.mode !== 'color') setMode('format'); }
         // Only demote from format — a collapsed selection must not close an open menu
         else if (bar.dataset.mode === 'format') setMode('plus');
     });
