@@ -478,14 +478,14 @@ function createFlatRow(todo, uid) {
     row.className = `todo-row${todo.isDone ? ' done' : ''}`;
     row.dataset.id = todo.id;
 
-    if (currentPage === 'soon' || currentPage === 'longRun') {
-        const dragHandle = document.createElement('div');
-        dragHandle.className = 'drag-handle';
-        dragHandle.innerHTML = '⋮⋮';
-        row.appendChild(dragHandle);
-    }
+    const dragHandle = document.createElement('div');
+    dragHandle.className = 'drag-handle';
+    dragHandle.innerHTML = '⋮⋮';
+    row.appendChild(dragHandle);
 
-    row.appendChild(createCheckbox(uid, todo.isDone));
+    if (currentPage !== 'keepInMind') {
+        row.appendChild(createCheckbox(uid, todo.isDone));
+    }
 
     const input = document.createElement('textarea');
     input.dataset.id = todo.id;
@@ -520,7 +520,8 @@ function createFlatRow(todo, uid) {
 
 function updateFlatRow(row, todo) {
     row.classList.toggle('done', todo.isDone);
-    updateCheckbox(row.querySelector('.checkbox-wrapper'), todo.isDone, false);
+    const checkboxWrapper = row.querySelector('.checkbox-wrapper');
+    if (checkboxWrapper) updateCheckbox(checkboxWrapper, todo.isDone, false);
 
     const input = row.querySelector('.todo-input');
     input.classList.toggle('done', todo.isDone);
