@@ -423,6 +423,40 @@ body {
     -webkit-user-select: none;
 }
 
+/* Selection format toolbar (Notes: bold / italic / underline) */
+.format-toolbar {
+    position: fixed;
+    display: flex;
+    background: var(--modal-bg);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    padding: 4px;
+    gap: 2px;
+    z-index: 1500;
+}
+
+.format-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text);
+    font-family: serif;
+    font-size: 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.format-btn:hover {
+    background: var(--input-bg);
+}
+.format-btn.format-bold { font-weight: bold; }
+.format-btn.format-italic { font-style: italic; }
+.format-btn.format-underline { text-decoration: underline; }
+
 /* Toggle list caret */
 .toggle-caret {
     margin-right: 4px;
@@ -492,7 +526,7 @@ body {
     color: var(--text-muted) !important;
 }
 
-/* Wrapping textarea for flat pages (Soon, Long run, Notes) */
+/* Wrapping textarea for flat pages (Soon, Long run) */
 .flat-list .todo-input {
     white-space: pre-wrap;
     word-break: break-word;
@@ -501,6 +535,12 @@ body {
     overflow: hidden;
     line-height: 1.4;
     padding: 0;
+}
+
+/* Notes: contenteditable so bold/italic/underline can be applied inline */
+.flat-list .todo-input[contenteditable="true"] {
+    cursor: text;
+    min-height: 1.4em;
 }
 
 .flat-list.todo-list {

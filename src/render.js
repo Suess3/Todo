@@ -280,8 +280,8 @@ function getDayName(epoch) {
 // getSiblings()                    → filtered list of todos for this view (for nav / backspace)
 // makeTempTodo(tempId, after, s)   → optimistic todo object to insert locally
 // persistTodo(after, sortOrder)    → calls addTodo with the right page/date args
-// getInsertSiblings()              → optional override of getSiblings used only for Enter (e.g. a toggle's children)
 // Deleting a toggle shouldn't orphan its children — reparent them to the toggle's own parent first.
+// Shared with attachNoteKeyboard (Notes); no-op elsewhere since only Notes todos have parentId set.
 function promoteChildren(uid, todoId) {
     const children = currentTodos.filter(t => t.parentId === todoId);
     if (children.length === 0) return;
@@ -291,7 +291,7 @@ function promoteChildren(uid, todoId) {
     children.forEach(c => setParent(uid, c.id, newParentId).catch(e => console.error(e)));
 }
 
-function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo, getInsertSiblings) {
+function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
     let enterInFlight = false;
 
     const onEnter = async (e) => {
@@ -301,7 +301,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo, getI
         enterInFlight = true;
 
         const todoId = input.dataset.id;
-        const siblings = (getInsertSiblings || getSiblings)();
+        const siblings = getSiblings();
         const cursor = input.selectionStart;
         const before = input.value.slice(0, cursor);
         const after = input.value.slice(cursor);
@@ -359,7 +359,6 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo, getI
             const prev = siblings[sibIdx - 1];
 
             if (!prev && input.value === '') {
-                promoteChildren(uid, todoId);
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 renderApp(currentTodos);
@@ -370,7 +369,6 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo, getI
 
             if (input.value === '') {
                 focusTarget = { id: prev.id, cursor: prev.text.length };
-                promoteChildren(uid, todoId);
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 renderApp(currentTodos);
@@ -381,7 +379,6 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo, getI
                 const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
                 currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
                 dirtyIds.add(prev.id);
-                promoteChildren(uid, todoId);
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 focusTarget = { id: prev.id, cursor: splitCursor };
@@ -491,28 +488,13 @@ function createFlatRow(todo, uid) {
     const row = document.createElement('div');
     row.className = `todo-row${todo.isDone ? ' done' : ''}`;
     row.dataset.id = todo.id;
-    row.style.paddingLeft = `${(flatDepthMap.get(todo.id) || 0) * 20}px`;
 
-    if (currentPage === 'keepInMind') {
-        const plusBtn = document.createElement('div');
-        plusBtn.className = 'row-plus-btn';
-        plusBtn.innerHTML = '+';
-        plusBtn.addEventListener('click', (e) => openRowMenu(e, todo, uid));
-        row.appendChild(plusBtn);
-    } else {
-        const dragHandle = document.createElement('div');
-        dragHandle.className = 'drag-handle';
-        dragHandle.innerHTML = '⋮⋮';
-        row.appendChild(dragHandle);
-    }
+    const dragHandle = document.createElement('div');
+    dragHandle.className = 'drag-handle';
+    dragHandle.innerHTML = '⋮⋮';
+    row.appendChild(dragHandle);
 
-    if (todo.isToggle) {
-        row.appendChild(createToggleCaret(todo, uid));
-    }
-
-    if (currentPage !== 'keepInMind') {
-        row.appendChild(createCheckbox(uid, todo.isDone));
-    }
+    row.appendChild(createCheckbox(uid, todo.isDone));
 
     const input = document.createElement('textarea');
     input.dataset.id = todo.id;
@@ -535,23 +517,32 @@ function createFlatRow(todo, uid) {
     attachBlurSave(input);
     attachKeyboard(
         input, uid,
-        () => currentTodos.filter(t => t.page === currentPage && (t.parentId || null) === (todo.parentId || null)),
-        (tempId, after, s) => {
-            const parentId = todo.isToggle ? todo.id : (todo.parentId || null);
-            if (todo.isToggle && todo.collapsed) {
-                const tIdx = currentTodos.findIndex(t => t.id === todo.id);
-                if (tIdx !== -1) currentTodos[tIdx] = { ...currentTodos[tIdx], collapsed: false };
-                setCollapsed(uid, todo.id, false).catch(e => console.error(e));
-            }
-            return { id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: s, moveCount: 0, page: currentPage, parentId };
-        },
-        (after, s) => addTodo(uid, 0, after, s, currentPage, todo.isToggle ? todo.id : (todo.parentId || null)),
-        todo.isToggle ? () => currentTodos.filter(t => t.page === currentPage && t.parentId === todo.id) : undefined
+        () => currentTodos.filter(t => t.page === currentPage),
+        (tempId, after, s) => ({ id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: s, moveCount: 0, page: currentPage }),
+        (after, s) => addTodo(uid, 0, after, s, currentPage)
     );
 
     requestAnimationFrame(autoGrow);
     row.appendChild(input);
     return row;
+}
+
+function updateFlatRow(row, todo) {
+    row.classList.toggle('done', todo.isDone);
+    updateCheckbox(row.querySelector('.checkbox-wrapper'), todo.isDone, false);
+
+    const input = row.querySelector('.todo-input');
+    input.classList.toggle('done', todo.isDone);
+    applySoonColor(input, todo);
+
+    if (document.activeElement !== input && !dirtyIds.has(todo.id)) {
+        if (input.value !== todo.text) {
+            input.value = todo.text;
+            // Re-measure height since content changed programmatically
+            input.style.height = 'auto';
+            input.style.height = input.scrollHeight + 'px';
+        }
+    }
 }
 
 function createToggleCaret(todo, uid) {
@@ -573,7 +564,7 @@ function createToggleCaret(todo, uid) {
                 { id: tempId, text: '', isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId: todo.id },
                 ...currentTodos.slice(idx + 1),
             ];
-            focusTarget = { id: tempId, cursor: 0 };
+            focusTarget = { id: tempId, cursor: 'start' };
             renderApp(currentTodos);
             setCollapsed(uid, todo.id, false).catch(e => console.error(e));
             addTodo(uid, 0, '', newSortOrder, currentPage, todo.id)
@@ -591,19 +582,61 @@ function createToggleCaret(todo, uid) {
     return caret;
 }
 
-function updateFlatRow(row, todo, uid) {
-    row.classList.toggle('done', todo.isDone);
+// --- Row create / update (Notes: contenteditable, so bold/italic/underline can be applied) ---
+
+function createNoteRow(todo, uid) {
+    const row = document.createElement('div');
+    row.className = `todo-row${todo.isDone ? ' done' : ''}`;
+    row.dataset.id = todo.id;
     row.style.paddingLeft = `${(flatDepthMap.get(todo.id) || 0) * 20}px`;
 
-    const checkboxWrapper = row.querySelector('.checkbox-wrapper');
-    if (checkboxWrapper) updateCheckbox(checkboxWrapper, todo.isDone, false);
+    const plusBtn = document.createElement('div');
+    plusBtn.className = 'row-plus-btn';
+    plusBtn.innerHTML = '+';
+    plusBtn.addEventListener('click', (e) => openRowMenu(e, todo, uid));
+    row.appendChild(plusBtn);
+
+    if (todo.isToggle) {
+        row.appendChild(createToggleCaret(todo, uid));
+    }
+
+    const input = document.createElement('div');
+    input.dataset.id = todo.id;
+    input.className = `todo-input${todo.isDone ? ' done' : ''}`;
+    input.contentEditable = 'true';
+    input.innerHTML = todo.text;
+
+    input.addEventListener('input', () => {
+        const id = input.dataset.id;
+        const idx = currentTodos.findIndex(t => t.id === id);
+        if (idx !== -1) currentTodos[idx] = { ...currentTodos[idx], text: input.innerHTML };
+        dirtyIds.add(id);
+        scheduleSave(id, input);
+    });
+
+    // Force plain-text paste — formatting only ever comes from our own bold/italic/underline toolbar
+    input.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+        document.execCommand('insertText', false, text);
+    });
+
+    attachBlurSave(input);
+    attachNoteKeyboard(input, uid, todo);
+
+    row.appendChild(input);
+    return row;
+}
+
+function updateNoteRow(row, todo, uid) {
+    row.classList.toggle('done', todo.isDone);
+    row.style.paddingLeft = `${(flatDepthMap.get(todo.id) || 0) * 20}px`;
 
     let caret = row.querySelector('.toggle-caret');
     if (todo.isToggle) {
         if (!caret) {
             caret = createToggleCaret(todo, uid);
-            const anchor = row.querySelector('.drag-handle') || row.querySelector('.row-plus-btn');
-            anchor.after(caret);
+            row.querySelector('.row-plus-btn').after(caret);
         } else {
             caret.classList.toggle('closed', !!todo.collapsed);
         }
@@ -613,17 +646,251 @@ function updateFlatRow(row, todo, uid) {
 
     const input = row.querySelector('.todo-input');
     input.classList.toggle('done', todo.isDone);
-    applySoonColor(input, todo);
 
     if (document.activeElement !== input && !dirtyIds.has(todo.id)) {
-        if (input.value !== todo.text) {
-            input.value = todo.text;
-            // Re-measure height since content changed programmatically
-            input.style.height = 'auto';
-            input.style.height = input.scrollHeight + 'px';
-        }
+        if (input.innerHTML !== todo.text) input.innerHTML = todo.text;
     }
 }
+
+// --- Contenteditable cursor helpers (Notes) ---
+
+function isCursorAtStart(el) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !sel.isCollapsed) return false;
+    const range = sel.getRangeAt(0);
+    if (!el.contains(range.startContainer)) return false;
+    const preRange = document.createRange();
+    preRange.selectNodeContents(el);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    return preRange.toString().length === 0;
+}
+
+function isCursorAtEnd(el) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount || !sel.isCollapsed) return false;
+    const range = sel.getRangeAt(0);
+    if (!el.contains(range.startContainer)) return false;
+    const postRange = document.createRange();
+    postRange.selectNodeContents(el);
+    postRange.setStart(range.startContainer, range.startOffset);
+    return postRange.toString().length === 0;
+}
+
+function placeCaretAtStart(el) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(true);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+}
+
+function placeCaretAtEnd(el) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+}
+
+// Splits el's content at the current cursor position: mutates el down to the "before" half
+// (removing everything after the cursor) and returns both halves as HTML strings.
+function splitContentEditableAtCursor(el) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return { before: el.innerHTML, after: '' };
+    const range = sel.getRangeAt(0);
+    const afterRange = range.cloneRange();
+    afterRange.selectNodeContents(el);
+    afterRange.setStart(range.endContainer, range.endOffset);
+    const afterFragment = afterRange.extractContents();
+    const before = el.innerHTML;
+    const tempDiv = document.createElement('div');
+    tempDiv.appendChild(afterFragment);
+    return { before, after: tempDiv.innerHTML };
+}
+
+// Enter/Backspace/Arrow handling for Notes rows — kept separate from attachKeyboard since
+// contenteditable has no .value/.selectionStart and Notes alone has toggle children to manage.
+function attachNoteKeyboard(input, uid, todo) {
+    let enterInFlight = false;
+
+    const getSiblings = () => currentTodos
+        .filter(t => t.page === currentPage && (t.parentId || null) === (todo.parentId || null))
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+
+    const onEnter = async (e) => {
+        e.preventDefault();
+        if (enterInFlight) return;
+        enterInFlight = true;
+
+        const todoId = input.dataset.id;
+        const idx = currentTodos.findIndex(t => t.id === todoId);
+        const current = currentTodos[idx];
+        const { before, after } = splitContentEditableAtCursor(input);
+
+        // Enter on a toggle's own header creates its first/next child; anywhere else creates a sibling
+        const isChildInsert = current.isToggle;
+        const insertSiblings = isChildInsert
+            ? currentTodos.filter(t => t.page === currentPage && t.parentId === current.id).sort((a, b) => a.sortOrder - b.sortOrder)
+            : getSiblings();
+        const sibIdx = insertSiblings.findIndex(t => t.id === todoId);
+        const nextSib = insertSiblings[sibIdx + 1];
+        const currentOrder = current.sortOrder;
+        const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
+        const newSortOrder = (currentOrder + nextOrder) / 2;
+        const parentId = isChildInsert ? current.id : (current.parentId || null);
+
+        currentTodos[idx] = { ...current, text: before };
+        dirtyIds.add(todoId);
+
+        if (isChildInsert && current.collapsed) {
+            currentTodos[idx] = { ...currentTodos[idx], collapsed: false };
+            setCollapsed(uid, todoId, false).catch(err => console.error(err));
+        }
+
+        const tempId = '_pending_' + Date.now();
+        currentTodos = [
+            ...currentTodos.slice(0, idx + 1),
+            { id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId },
+            ...currentTodos.slice(idx + 1),
+        ];
+        focusTarget = { id: tempId, cursor: 'start' };
+        renderApp(currentTodos);
+
+        try {
+            updateSaveStatus('saving');
+            const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage, parentId);
+            updateSaveStatus('idle');
+            currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
+            if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
+            document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+        } catch (err) {
+            updateSaveStatus('error');
+            showToast('Failed to create todo', 'error');
+            currentTodos = currentTodos.filter(t => t.id !== tempId);
+            renderApp(currentTodos);
+            console.error(err);
+        }
+
+        enterInFlight = false;
+    };
+
+    // beforeinput is the reliable way to catch Enter in contenteditable on Android (mirrors the
+    // keypress fallback attachKeyboard uses for the same reason on textareas)
+    input.addEventListener('beforeinput', (e) => {
+        if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') onEnter(e);
+    });
+    input.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter') { await onEnter(e); return; }
+
+        const todoId = input.dataset.id;
+
+        if (e.key === 'Backspace' && isCursorAtStart(input)) {
+            e.preventDefault();
+            const siblings = getSiblings();
+            const sibIdx = siblings.findIndex(t => t.id === todoId);
+            const prev = siblings[sibIdx - 1];
+
+            if (!prev && input.textContent === '') {
+                promoteChildren(uid, todoId);
+                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                dirtyIds.delete(todoId);
+                renderApp(currentTodos);
+                deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
+                return;
+            }
+            if (!prev) return;
+
+            if (input.textContent === '') {
+                focusTarget = { id: prev.id, cursor: 'end' };
+                promoteChildren(uid, todoId);
+                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                dirtyIds.delete(todoId);
+                renderApp(currentTodos);
+                deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
+            } else {
+                const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
+                currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: prev.text + input.innerHTML };
+                dirtyIds.add(prev.id);
+                promoteChildren(uid, todoId);
+                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                dirtyIds.delete(todoId);
+                focusTarget = { id: prev.id, cursor: 'end' };
+                renderApp(currentTodos);
+                deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
+            }
+            return;
+        }
+
+        if (e.key === 'ArrowUp' && isCursorAtStart(input)) {
+            e.preventDefault();
+            const siblings = getSiblings();
+            const prev = siblings[siblings.findIndex(t => t.id === todoId) - 1];
+            if (prev) {
+                const el = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
+                if (el) { el.focus(); placeCaretAtEnd(el); }
+            }
+        }
+
+        if (e.key === 'ArrowDown' && isCursorAtEnd(input)) {
+            e.preventDefault();
+            const siblings = getSiblings();
+            const next = siblings[siblings.findIndex(t => t.id === todoId) + 1];
+            if (next) {
+                const el = document.querySelector(`.todo-input[data-id="${next.id}"]`);
+                if (el) { el.focus(); placeCaretAtStart(el); }
+            }
+        }
+    });
+}
+
+// --- Selection format toolbar (Notes: bold / italic / underline) ---
+
+let formatToolbarEl = null;
+
+function hideFormatToolbar() {
+    if (formatToolbarEl) { formatToolbarEl.remove(); formatToolbarEl = null; }
+}
+
+function showFormatToolbar(rect) {
+    hideFormatToolbar();
+    const bar = document.createElement('div');
+    bar.className = 'format-toolbar';
+
+    [['bold', 'B'], ['italic', 'I'], ['underline', 'U']].forEach(([cmd, label]) => {
+        const btn = document.createElement('div');
+        btn.className = `format-btn format-${cmd}`;
+        btn.textContent = label;
+        // Keep the text selection alive through the tap so execCommand has something to act on
+        btn.addEventListener('pointerdown', (e) => e.preventDefault());
+        btn.addEventListener('click', () => {
+            const active = document.activeElement;
+            document.execCommand(cmd);
+            active?.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        bar.appendChild(btn);
+    });
+
+    document.body.appendChild(bar);
+    const top = rect.top - bar.offsetHeight - 8;
+    const left = rect.left + rect.width / 2 - bar.offsetWidth / 2;
+    bar.style.top = `${Math.max(4, top)}px`;
+    bar.style.left = `${Math.max(4, left)}px`;
+    formatToolbarEl = bar;
+}
+
+document.addEventListener('selectionchange', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideFormatToolbar(); return; }
+    const anchor = sel.anchorNode;
+    const anchorEl = anchor && (anchor.nodeType === 1 ? anchor : anchor.parentElement);
+    const el = anchorEl?.closest?.('.todo-input[contenteditable="true"]');
+    if (!el) { hideFormatToolbar(); return; }
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) { hideFormatToolbar(); return; }
+    showFormatToolbar(rect);
+});
 
 // --- Core reconciliation ---
 
@@ -661,7 +928,14 @@ export function renderApp(todos) {
     // Restore focus after Enter (new todo) or Backspace (merge) operations
     if (focusTarget) {
         const el = container.querySelector(`.todo-input[data-id="${focusTarget.id}"]`);
-        if (el) { el.focus(); el.setSelectionRange(focusTarget.cursor, focusTarget.cursor); }
+        if (el) {
+            el.focus();
+            if (el.isContentEditable) {
+                if (focusTarget.cursor === 'end') placeCaretAtEnd(el); else placeCaretAtStart(el);
+            } else {
+                el.setSelectionRange(focusTarget.cursor, focusTarget.cursor);
+            }
+        }
         focusTarget = null;
     }
 }
@@ -862,11 +1136,12 @@ function reconcileFlatView(container, todos, uid) {
     }
     addBtn.textContent = pageTodos.length === 0 ? t('no_items') : '';
 
+    const isNotes = currentPage === 'keepInMind';
     reconcileRows(
         list, displayTodos, addBtn,
         existingById,
-        todo => createFlatRow(todo, uid),
-        (row, todo) => updateFlatRow(row, todo, uid)
+        todo => isNotes ? createNoteRow(todo, uid) : createFlatRow(todo, uid),
+        (row, todo) => isNotes ? updateNoteRow(row, todo, uid) : updateFlatRow(row, todo)
     );
 }
 
