@@ -563,6 +563,28 @@ function createToggleCaret(todo, uid) {
         if (idx === -1) return;
         const newCollapsed = !currentTodos[idx].collapsed;
         currentTodos[idx] = { ...currentTodos[idx], collapsed: newCollapsed };
+
+        // Expanding an empty toggle: give it a first, empty child to type into right away
+        if (!newCollapsed && !currentTodos.some(t => t.parentId === todo.id)) {
+            const tempId = '_pending_' + Date.now();
+            const newSortOrder = Date.now();
+            currentTodos = [
+                ...currentTodos.slice(0, idx + 1),
+                { id: tempId, text: '', isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId: todo.id },
+                ...currentTodos.slice(idx + 1),
+            ];
+            focusTarget = { id: tempId, cursor: 0 };
+            renderApp(currentTodos);
+            setCollapsed(uid, todo.id, false).catch(e => console.error(e));
+            addTodo(uid, 0, '', newSortOrder, currentPage, todo.id)
+                .then(newDoc => {
+                    currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
+                    document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
+                })
+                .catch(e => { showToast('Failed to create item', 'error'); console.error(e); });
+            return;
+        }
+
         renderApp(currentTodos);
         setCollapsed(uid, todo.id, newCollapsed).catch(e => console.error(e));
     });
@@ -881,9 +903,12 @@ function openRowMenu(e, todo, uid) {
 function convertRowToToggle(todo, uid) {
     const idx = currentTodos.findIndex(t => t.id === todo.id);
     if (idx === -1) return;
-    currentTodos[idx] = { ...currentTodos[idx], isToggle: true, collapsed: false };
+    currentTodos[idx] = { ...currentTodos[idx], isToggle: true, collapsed: true };
     renderApp(currentTodos);
-    setIsToggle(uid, todo.id, true).catch(e => { showToast('Failed to convert', 'error'); console.error(e); });
+    Promise.all([
+        setIsToggle(uid, todo.id, true),
+        setCollapsed(uid, todo.id, true),
+    ]).catch(e => { showToast('Failed to convert', 'error'); console.error(e); });
 }
 
 document.addEventListener('pointerdown', (e) => {
