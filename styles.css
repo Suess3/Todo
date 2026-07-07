@@ -355,11 +355,24 @@ body {
     padding: 0 4px 0 4px;
     font-size: 15px;
     color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.2s;
     user-select: none;
     -webkit-user-select: none;
 }
+.todo-row:hover .row-plus-btn {
+    opacity: 0.6;
+}
 .row-plus-btn:hover {
+    opacity: 1 !important;
     color: var(--text);
+}
+
+@media (max-width: 768px) {
+    /* Mobile uses the docked bar above the keyboard instead */
+    .row-plus-btn {
+        display: none;
+    }
 }
 
 .row-menu {
@@ -382,6 +395,32 @@ body {
 }
 .row-menu-item:hover {
     background: var(--input-bg);
+}
+
+/* Mobile Notes compose bar (docked above the keyboard) */
+.mobile-notes-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: none;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 8px 16px;
+    background: var(--bg);
+    border-top: 1px solid var(--border-subtle);
+    z-index: 1600;
+}
+.mobile-notes-bar.visible {
+    display: flex;
+}
+.mobile-notes-bar-btn {
+    font-size: 22px;
+    color: var(--text);
+    padding: 4px 12px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 /* Toggle list caret */

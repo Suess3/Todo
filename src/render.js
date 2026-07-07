@@ -499,12 +499,12 @@ function createFlatRow(todo, uid) {
         plusBtn.innerHTML = '+';
         plusBtn.addEventListener('click', (e) => openRowMenu(e, todo, uid));
         row.appendChild(plusBtn);
+    } else {
+        const dragHandle = document.createElement('div');
+        dragHandle.className = 'drag-handle';
+        dragHandle.innerHTML = '⋮⋮';
+        row.appendChild(dragHandle);
     }
-
-    const dragHandle = document.createElement('div');
-    dragHandle.className = 'drag-handle';
-    dragHandle.innerHTML = '⋮⋮';
-    row.appendChild(dragHandle);
 
     if (todo.isToggle) {
         row.appendChild(createToggleCaret(todo, uid));
@@ -602,7 +602,8 @@ function updateFlatRow(row, todo, uid) {
     if (todo.isToggle) {
         if (!caret) {
             caret = createToggleCaret(todo, uid);
-            row.querySelector('.drag-handle').after(caret);
+            const anchor = row.querySelector('.drag-handle') || row.querySelector('.row-plus-btn');
+            anchor.after(caret);
         } else {
             caret.classList.toggle('closed', !!todo.collapsed);
         }
@@ -883,9 +884,6 @@ function openRowMenu(e, todo, uid) {
 
     const menu = document.createElement('div');
     menu.className = 'row-menu';
-    const rect = e.currentTarget.getBoundingClientRect();
-    menu.style.left = `${rect.left}px`;
-    menu.style.top = `${rect.bottom + 4}px`;
 
     const toggleOpt = document.createElement('div');
     toggleOpt.className = 'row-menu-item';
@@ -896,7 +894,15 @@ function openRowMenu(e, todo, uid) {
     });
     menu.appendChild(toggleOpt);
 
+    // Append (invisible until positioned) so we can measure it — needed to flip the
+    // menu upward when it's triggered from the bottom-docked mobile bar.
     document.body.appendChild(menu);
+    const rect = e.currentTarget.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const top = spaceBelow >= menu.offsetHeight + 8 ? rect.bottom + 4 : rect.top - menu.offsetHeight - 4;
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${Math.max(4, top)}px`;
+
     openMenuEl = menu;
 }
 
@@ -934,6 +940,7 @@ function initDragAndDrop() {
 
     container.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) return;
+        if (currentPage === 'keepInMind') return; // Notes: no drag & drop
 
         const isTouch = e.pointerType === 'touch';
         const handle = e.target.closest('.drag-handle');
@@ -1075,51 +1082,24 @@ function initDragAndDrop() {
     });
 }
 
-// Walks nodeId's parentId chain to check whether it descends from ancestorId — used to
-// stop a toggle from being dropped inside its own subtree (which would create a cycle).
-function isDescendant(ancestorId, nodeId) {
-    let cur = currentTodos.find(t => t.id === nodeId);
-    while (cur && cur.parentId) {
-        if (cur.parentId === ancestorId) return true;
-        cur = currentTodos.find(t => t.id === cur.parentId);
-    }
-    return false;
-}
-
 function handleDrop(draggedId, prevId, nextId) {
-    const dragged = currentTodos.find(t => t.id === draggedId);
     const prev = currentTodos.find(t => t.id === prevId);
     const next = currentTodos.find(t => t.id === nextId);
-    const nesting = currentPage === 'keepInMind';
 
-    let newParentId = nesting ? (dragged.parentId || null) : null;
     let newSortOrder;
-
-    if (nesting && prev && prev.isToggle && !isDescendant(draggedId, prev.id)) {
-        // Dropped directly onto/after a toggle header — nest as its first child
-        newParentId = prev.id;
-        const firstChild = next && (next.parentId || null) === newParentId ? next : null;
-        newSortOrder = firstChild ? firstChild.sortOrder - 2000 : Date.now();
+    if (prev && next) {
+        newSortOrder = (prev.sortOrder + next.sortOrder) / 2;
     } else if (prev) {
-        newParentId = nesting ? (prev.parentId || null) : null;
-        const sameLevelNext = next && (!nesting || (next.parentId || null) === newParentId) ? next : null;
-        newSortOrder = sameLevelNext ? (prev.sortOrder + sameLevelNext.sortOrder) / 2 : prev.sortOrder + 2000;
+        newSortOrder = prev.sortOrder + 2000;
     } else if (next) {
-        newParentId = nesting ? (next.parentId || null) : null;
         newSortOrder = next.sortOrder - 2000;
     } else {
-        newParentId = null;
         newSortOrder = Date.now();
-    }
-
-    // Never allow a toggle to end up nested under one of its own descendants
-    if (nesting && newParentId && (newParentId === draggedId || isDescendant(draggedId, newParentId))) {
-        newParentId = dragged.parentId || null;
     }
 
     const idx = currentTodos.findIndex(t => t.id === draggedId);
     if (idx !== -1) {
-        currentTodos[idx] = { ...currentTodos[idx], sortOrder: newSortOrder, parentId: newParentId };
+        currentTodos[idx] = { ...currentTodos[idx], sortOrder: newSortOrder };
         currentTodos.sort((a, b) => a.sortOrder - b.sortOrder);
         renderApp(currentTodos);
 
@@ -1129,9 +1109,7 @@ function handleDrop(draggedId, prevId, nextId) {
             // stale snapshot that arrives before this write has propagated (snap-back)
             dirtyIds.add(draggedId);
             updateSaveStatus('saving');
-            const writes = [updateSortOrder(uid, draggedId, newSortOrder)];
-            if (nesting) writes.push(setParent(uid, draggedId, newParentId));
-            Promise.all(writes)
+            updateSortOrder(uid, draggedId, newSortOrder)
                 .then(() => {
                     dirtyIds.delete(draggedId);
                     updateSaveStatus('idle');
@@ -1147,6 +1125,67 @@ function handleDrop(draggedId, prevId, nextId) {
 }
 
 initDragAndDrop();
+
+// --- Mobile Notes compose bar ---
+// No mouse on mobile, so the per-row "+" (hover-only on desktop) doesn't work there.
+// Instead, dock a "+" above the keyboard while a Notes input is focused — best effort via
+// VisualViewport, since fixed-position elements don't naturally follow the keyboard on iOS.
+function initMobileNotesBar() {
+    let bar = null;
+    let focusedNoteId = null;
+
+    const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
+
+    function ensureBar() {
+        if (bar) return bar;
+        bar = document.createElement('div');
+        bar.className = 'mobile-notes-bar';
+        const btn = document.createElement('div');
+        btn.className = 'mobile-notes-bar-btn';
+        btn.textContent = '+';
+        // Keep the input focused (and keyboard open) through the tap
+        btn.addEventListener('pointerdown', (e) => e.preventDefault());
+        btn.addEventListener('click', (e) => {
+            const todo = currentTodos.find(t => t.id === focusedNoteId);
+            const uid = auth.currentUser?.uid;
+            if (todo && uid) openRowMenu({ currentTarget: e.currentTarget, stopPropagation() {} }, todo, uid);
+        });
+        bar.appendChild(btn);
+        document.body.appendChild(bar);
+        return bar;
+    }
+
+    function reposition() {
+        if (!bar || !bar.classList.contains('visible') || !window.visualViewport) return;
+        const vv = window.visualViewport;
+        const offsetFromBottom = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+        bar.style.bottom = `${offsetFromBottom}px`;
+    }
+
+    document.addEventListener('focusin', (e) => {
+        if (!isMobile() || currentPage !== 'keepInMind' || !e.target.classList.contains('todo-input')) return;
+        focusedNoteId = e.target.dataset.id;
+        ensureBar().classList.add('visible');
+        reposition();
+    });
+
+    document.addEventListener('focusout', (e) => {
+        if (!e.target.classList.contains('todo-input')) return;
+        setTimeout(() => {
+            if (!document.activeElement?.classList.contains('todo-input')) {
+                bar?.classList.remove('visible');
+                focusedNoteId = null;
+            }
+        }, 50);
+    });
+
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', reposition);
+        window.visualViewport.addEventListener('scroll', reposition);
+    }
+}
+
+initMobileNotesBar();
 
 // Cancel typing animation on any user interaction so the UI stays fully responsive
 document.addEventListener('pointerdown', () => {
