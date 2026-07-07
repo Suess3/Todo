@@ -46,7 +46,7 @@ export function subscribeTodos(uid, callback) {
     });
 }
 
-export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now(), page = 'todo') {
+export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now(), page = 'todo', parentId = null) {
     return addDoc(todosRef(uid), {
         text,
         isDone: false,
@@ -54,6 +54,9 @@ export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now(),
         sortOrder,
         moveCount: 0,
         page,
+        parentId,
+        isToggle: false,
+        collapsed: false,
         createdAt: Date.now(),
     });
 }
@@ -93,6 +96,18 @@ export async function updateSortOrder(uid, id, sortOrder) {
 
 export async function deleteTodo(uid, id) {
     return deleteDoc(doc(db, 'users', uid, 'todos', id));
+}
+
+export async function setIsToggle(uid, id, isToggle) {
+    return updateDoc(doc(db, 'users', uid, 'todos', id), { isToggle });
+}
+
+export async function setCollapsed(uid, id, collapsed) {
+    return updateDoc(doc(db, 'users', uid, 'todos', id), { collapsed });
+}
+
+export async function setParent(uid, id, parentId) {
+    return updateDoc(doc(db, 'users', uid, 'todos', id), { parentId });
 }
 
 function localDayKey() {

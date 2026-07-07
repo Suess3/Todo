@@ -1,5 +1,5 @@
 import { auth } from './firebase.js';
-import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, updateSortOrder, deleteTodo, recordProductivity } from './todoService.js';
+import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, updateSortOrder, deleteTodo, recordProductivity, setIsToggle, setCollapsed, setParent } from './todoService.js';
 import { getUrgencyIntensity } from './settings.js';
 import { triggerCheckAnimation, triggerCascade } from './animations.js';
 import { t } from './i18n.js';
@@ -280,7 +280,18 @@ function getDayName(epoch) {
 // getSiblings()                    → filtered list of todos for this view (for nav / backspace)
 // makeTempTodo(tempId, after, s)   → optimistic todo object to insert locally
 // persistTodo(after, sortOrder)    → calls addTodo with the right page/date args
-function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
+// getInsertSiblings()              → optional override of getSiblings used only for Enter (e.g. a toggle's children)
+// Deleting a toggle shouldn't orphan its children — reparent them to the toggle's own parent first.
+function promoteChildren(uid, todoId) {
+    const children = currentTodos.filter(t => t.parentId === todoId);
+    if (children.length === 0) return;
+    const deleted = currentTodos.find(t => t.id === todoId);
+    const newParentId = deleted?.parentId || null;
+    currentTodos = currentTodos.map(t => t.parentId === todoId ? { ...t, parentId: newParentId } : t);
+    children.forEach(c => setParent(uid, c.id, newParentId).catch(e => console.error(e)));
+}
+
+function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo, getInsertSiblings) {
     let enterInFlight = false;
 
     const onEnter = async (e) => {
@@ -290,7 +301,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
         enterInFlight = true;
 
         const todoId = input.dataset.id;
-        const siblings = getSiblings();
+        const siblings = (getInsertSiblings || getSiblings)();
         const cursor = input.selectionStart;
         const before = input.value.slice(0, cursor);
         const after = input.value.slice(cursor);
@@ -348,6 +359,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
             const prev = siblings[sibIdx - 1];
 
             if (!prev && input.value === '') {
+                promoteChildren(uid, todoId);
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 renderApp(currentTodos);
@@ -358,6 +370,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
 
             if (input.value === '') {
                 focusTarget = { id: prev.id, cursor: prev.text.length };
+                promoteChildren(uid, todoId);
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 renderApp(currentTodos);
@@ -368,6 +381,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
                 const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
                 currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
                 dirtyIds.add(prev.id);
+                promoteChildren(uid, todoId);
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 focusTarget = { id: prev.id, cursor: splitCursor };
@@ -477,11 +491,24 @@ function createFlatRow(todo, uid) {
     const row = document.createElement('div');
     row.className = `todo-row${todo.isDone ? ' done' : ''}`;
     row.dataset.id = todo.id;
+    row.style.paddingLeft = `${(flatDepthMap.get(todo.id) || 0) * 20}px`;
+
+    if (currentPage === 'keepInMind') {
+        const plusBtn = document.createElement('div');
+        plusBtn.className = 'row-plus-btn';
+        plusBtn.innerHTML = '+';
+        plusBtn.addEventListener('click', (e) => openRowMenu(e, todo, uid));
+        row.appendChild(plusBtn);
+    }
 
     const dragHandle = document.createElement('div');
     dragHandle.className = 'drag-handle';
     dragHandle.innerHTML = '⋮⋮';
     row.appendChild(dragHandle);
+
+    if (todo.isToggle) {
+        row.appendChild(createToggleCaret(todo, uid));
+    }
 
     if (currentPage !== 'keepInMind') {
         row.appendChild(createCheckbox(uid, todo.isDone));
@@ -508,9 +535,18 @@ function createFlatRow(todo, uid) {
     attachBlurSave(input);
     attachKeyboard(
         input, uid,
-        () => currentTodos.filter(t => t.page === currentPage),
-        (tempId, after, s) => ({ id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: s, moveCount: 0, page: currentPage }),
-        (after, s) => addTodo(uid, 0, after, s, currentPage)
+        () => currentTodos.filter(t => t.page === currentPage && (t.parentId || null) === (todo.parentId || null)),
+        (tempId, after, s) => {
+            const parentId = todo.isToggle ? todo.id : (todo.parentId || null);
+            if (todo.isToggle && todo.collapsed) {
+                const tIdx = currentTodos.findIndex(t => t.id === todo.id);
+                if (tIdx !== -1) currentTodos[tIdx] = { ...currentTodos[tIdx], collapsed: false };
+                setCollapsed(uid, todo.id, false).catch(e => console.error(e));
+            }
+            return { id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: s, moveCount: 0, page: currentPage, parentId };
+        },
+        (after, s) => addTodo(uid, 0, after, s, currentPage, todo.isToggle ? todo.id : (todo.parentId || null)),
+        todo.isToggle ? () => currentTodos.filter(t => t.page === currentPage && t.parentId === todo.id) : undefined
     );
 
     requestAnimationFrame(autoGrow);
@@ -518,10 +554,39 @@ function createFlatRow(todo, uid) {
     return row;
 }
 
-function updateFlatRow(row, todo) {
+function createToggleCaret(todo, uid) {
+    const caret = document.createElement('div');
+    caret.className = `toggle-caret${todo.collapsed ? ' closed' : ''}`;
+    caret.textContent = '▼';
+    caret.addEventListener('click', () => {
+        const idx = currentTodos.findIndex(t => t.id === todo.id);
+        if (idx === -1) return;
+        const newCollapsed = !currentTodos[idx].collapsed;
+        currentTodos[idx] = { ...currentTodos[idx], collapsed: newCollapsed };
+        renderApp(currentTodos);
+        setCollapsed(uid, todo.id, newCollapsed).catch(e => console.error(e));
+    });
+    return caret;
+}
+
+function updateFlatRow(row, todo, uid) {
     row.classList.toggle('done', todo.isDone);
+    row.style.paddingLeft = `${(flatDepthMap.get(todo.id) || 0) * 20}px`;
+
     const checkboxWrapper = row.querySelector('.checkbox-wrapper');
     if (checkboxWrapper) updateCheckbox(checkboxWrapper, todo.isDone, false);
+
+    let caret = row.querySelector('.toggle-caret');
+    if (todo.isToggle) {
+        if (!caret) {
+            caret = createToggleCaret(todo, uid);
+            row.querySelector('.drag-handle').after(caret);
+        } else {
+            caret.classList.toggle('closed', !!todo.collapsed);
+        }
+    } else if (caret) {
+        caret.remove();
+    }
 
     const input = row.querySelector('.todo-input');
     input.classList.toggle('done', todo.isDone);
@@ -718,10 +783,44 @@ function buildAddBtn(isEmpty, emptyText, onClick) {
 
 // --- Flat view ---
 
+// Maps todo id → nesting depth for the current render pass, populated by flattenForDisplay().
+// Only keepInMind actually nests; other flat pages get depth 0 for every row.
+let flatDepthMap = new Map();
+
+function flattenForDisplay(pageTodos) {
+    flatDepthMap = new Map();
+
+    if (currentPage !== 'keepInMind') {
+        const sorted = [...pageTodos].sort((a, b) => a.sortOrder - b.sortOrder);
+        sorted.forEach(t => flatDepthMap.set(t.id, 0));
+        return sorted;
+    }
+
+    const childrenOf = new Map();
+    pageTodos.forEach(todo => {
+        const key = todo.parentId || null;
+        if (!childrenOf.has(key)) childrenOf.set(key, []);
+        childrenOf.get(key).push(todo);
+    });
+    childrenOf.forEach(list => list.sort((a, b) => a.sortOrder - b.sortOrder));
+
+    const result = [];
+    (function walk(parentId, depth) {
+        (childrenOf.get(parentId) || []).forEach(node => {
+            flatDepthMap.set(node.id, depth);
+            result.push(node);
+            if (!node.isToggle || !node.collapsed) walk(node.id, depth + 1);
+        });
+    })(null, 0);
+
+    return result;
+}
+
 function reconcileFlatView(container, todos, uid) {
     container.querySelectorAll('.day-section').forEach(s => s.remove());
 
     const pageTodos = todos.filter(t => t.page === currentPage);
+    const displayTodos = flattenForDisplay(pageTodos);
 
     let list = container.querySelector('.todo-list.flat-list');
     if (!list) {
@@ -741,12 +840,55 @@ function reconcileFlatView(container, todos, uid) {
     addBtn.textContent = pageTodos.length === 0 ? t('no_items') : '';
 
     reconcileRows(
-        list, pageTodos, addBtn,
+        list, displayTodos, addBtn,
         existingById,
         todo => createFlatRow(todo, uid),
-        (row, todo) => updateFlatRow(row, todo)
+        (row, todo) => updateFlatRow(row, todo, uid)
     );
 }
+
+// --- Row menu (Notes: "+" button) ---
+
+let openMenuEl = null;
+
+function closeRowMenu() {
+    if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
+}
+
+function openRowMenu(e, todo, uid) {
+    e.stopPropagation();
+    closeRowMenu();
+
+    const menu = document.createElement('div');
+    menu.className = 'row-menu';
+    const rect = e.currentTarget.getBoundingClientRect();
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 4}px`;
+
+    const toggleOpt = document.createElement('div');
+    toggleOpt.className = 'row-menu-item';
+    toggleOpt.textContent = t('toggle_list');
+    toggleOpt.addEventListener('click', () => {
+        convertRowToToggle(todo, uid);
+        closeRowMenu();
+    });
+    menu.appendChild(toggleOpt);
+
+    document.body.appendChild(menu);
+    openMenuEl = menu;
+}
+
+function convertRowToToggle(todo, uid) {
+    const idx = currentTodos.findIndex(t => t.id === todo.id);
+    if (idx === -1) return;
+    currentTodos[idx] = { ...currentTodos[idx], isToggle: true, collapsed: false };
+    renderApp(currentTodos);
+    setIsToggle(uid, todo.id, true).catch(e => { showToast('Failed to convert', 'error'); console.error(e); });
+}
+
+document.addEventListener('pointerdown', (e) => {
+    if (openMenuEl && !openMenuEl.contains(e.target) && !e.target.closest('.row-plus-btn')) closeRowMenu();
+});
 
 // --- Drag and Drop ---
 
@@ -908,24 +1050,51 @@ function initDragAndDrop() {
     });
 }
 
+// Walks nodeId's parentId chain to check whether it descends from ancestorId — used to
+// stop a toggle from being dropped inside its own subtree (which would create a cycle).
+function isDescendant(ancestorId, nodeId) {
+    let cur = currentTodos.find(t => t.id === nodeId);
+    while (cur && cur.parentId) {
+        if (cur.parentId === ancestorId) return true;
+        cur = currentTodos.find(t => t.id === cur.parentId);
+    }
+    return false;
+}
+
 function handleDrop(draggedId, prevId, nextId) {
+    const dragged = currentTodos.find(t => t.id === draggedId);
     const prev = currentTodos.find(t => t.id === prevId);
     const next = currentTodos.find(t => t.id === nextId);
-    
+    const nesting = currentPage === 'keepInMind';
+
+    let newParentId = nesting ? (dragged.parentId || null) : null;
     let newSortOrder;
-    if (prev && next) {
-        newSortOrder = (prev.sortOrder + next.sortOrder) / 2;
+
+    if (nesting && prev && prev.isToggle && !isDescendant(draggedId, prev.id)) {
+        // Dropped directly onto/after a toggle header — nest as its first child
+        newParentId = prev.id;
+        const firstChild = next && (next.parentId || null) === newParentId ? next : null;
+        newSortOrder = firstChild ? firstChild.sortOrder - 2000 : Date.now();
     } else if (prev) {
-        newSortOrder = prev.sortOrder + 2000;
+        newParentId = nesting ? (prev.parentId || null) : null;
+        const sameLevelNext = next && (!nesting || (next.parentId || null) === newParentId) ? next : null;
+        newSortOrder = sameLevelNext ? (prev.sortOrder + sameLevelNext.sortOrder) / 2 : prev.sortOrder + 2000;
     } else if (next) {
+        newParentId = nesting ? (next.parentId || null) : null;
         newSortOrder = next.sortOrder - 2000;
     } else {
+        newParentId = null;
         newSortOrder = Date.now();
+    }
+
+    // Never allow a toggle to end up nested under one of its own descendants
+    if (nesting && newParentId && (newParentId === draggedId || isDescendant(draggedId, newParentId))) {
+        newParentId = dragged.parentId || null;
     }
 
     const idx = currentTodos.findIndex(t => t.id === draggedId);
     if (idx !== -1) {
-        currentTodos[idx].sortOrder = newSortOrder;
+        currentTodos[idx] = { ...currentTodos[idx], sortOrder: newSortOrder, parentId: newParentId };
         currentTodos.sort((a, b) => a.sortOrder - b.sortOrder);
         renderApp(currentTodos);
 
@@ -935,7 +1104,9 @@ function handleDrop(draggedId, prevId, nextId) {
             // stale snapshot that arrives before this write has propagated (snap-back)
             dirtyIds.add(draggedId);
             updateSaveStatus('saving');
-            updateSortOrder(uid, draggedId, newSortOrder)
+            const writes = [updateSortOrder(uid, draggedId, newSortOrder)];
+            if (nesting) writes.push(setParent(uid, draggedId, newParentId));
+            Promise.all(writes)
                 .then(() => {
                     dirtyIds.delete(draggedId);
                     updateSaveStatus('idle');

@@ -47,6 +47,7 @@ const translations = {
         month_11: 'December',
         no_tasks: 'No tasks (tap to add)',
         no_items: 'No items (tap to add)',
+        toggle_list: 'Toggle list',
     },
     de: {
         settings: 'Einstellungen',
@@ -94,6 +95,7 @@ const translations = {
         month_11: 'Dezember',
         no_tasks: 'Keine Aufgaben (tippen zum Hinzufügen)',
         no_items: 'Keine Einträge (tippen zum Hinzufügen)',
+        toggle_list: 'Ausklappliste',
     }
 };
 
