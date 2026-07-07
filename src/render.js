@@ -910,6 +910,23 @@ function attachNoteKeyboard(input, uid) {
 
         if (e.key === 'Backspace' && isCursorAtStart(input)) {
             e.preventDefault();
+
+            // Backspace on an empty toggle's own header un-toggles it back to a plain empty row
+            // instead of deleting the line — same idea as a block editor's block "un-typing" on delete
+            const current = currentTodos.find(t => t.id === todoId);
+            if (current?.isToggle && input.textContent === '') {
+                const idx = currentTodos.findIndex(t => t.id === todoId);
+                currentTodos[idx] = { ...currentTodos[idx], isToggle: false, collapsed: false };
+                promoteChildren(uid, todoId);
+                focusTarget = { id: todoId, cursor: 'start' };
+                renderApp(currentTodos);
+                Promise.all([
+                    setIsToggle(uid, todoId, false),
+                    setCollapsed(uid, todoId, false),
+                ]).catch(err => console.error(err));
+                return;
+            }
+
             const siblings = getSiblings();
             const sibIdx = siblings.findIndex(t => t.id === todoId);
             const prev = siblings[sibIdx - 1];
