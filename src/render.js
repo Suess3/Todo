@@ -379,6 +379,10 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
                 const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
                 currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
                 dirtyIds.add(prev.id);
+                // Write the merge straight into prev's DOM node — the dirty flag we just set
+                // would otherwise make the reconcile below skip refreshing its (already-rendered) value
+                const prevEl = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
+                if (prevEl) prevEl.value = mergedText;
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
                 focusTarget = { id: prev.id, cursor: splitCursor };
@@ -811,8 +815,13 @@ function attachNoteKeyboard(input, uid, todo) {
                 deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
             } else {
                 const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
-                currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: prev.text + input.innerHTML };
+                const mergedText = prev.text + input.innerHTML;
+                currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
                 dirtyIds.add(prev.id);
+                // Write the merge straight into prev's DOM node — the dirty flag we just set
+                // would otherwise make the reconcile below skip refreshing its (already-rendered) content
+                const prevEl = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
+                if (prevEl) prevEl.innerHTML = mergedText;
                 promoteChildren(uid, todoId);
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
@@ -845,7 +854,11 @@ function attachNoteKeyboard(input, uid, todo) {
     });
 }
 
-// --- Selection format toolbar (Notes: bold / italic / underline) ---
+function isMobileViewport() {
+    return window.matchMedia('(max-width: 768px)').matches;
+}
+
+// --- Selection format toolbar (Notes: bold / italic / underline, desktop only — see initMobileNotesBar) ---
 
 let formatToolbarEl = null;
 
@@ -862,8 +875,10 @@ function showFormatToolbar(rect) {
         const btn = document.createElement('div');
         btn.className = `format-btn format-${cmd}`;
         btn.textContent = label;
-        // Keep the text selection alive through the tap so execCommand has something to act on
-        btn.addEventListener('pointerdown', (e) => e.preventDefault());
+        // Keep the text selection alive through the tap so execCommand has something to act on.
+        // Must be mousedown, not pointerdown — mousedown's default action is what actually
+        // collapses the selection/moves focus, and preventing pointerdown alone doesn't stop that.
+        btn.addEventListener('mousedown', (e) => e.preventDefault());
         btn.addEventListener('click', () => {
             const active = document.activeElement;
             document.execCommand(cmd);
@@ -881,6 +896,8 @@ function showFormatToolbar(rect) {
 }
 
 document.addEventListener('selectionchange', () => {
+    // Mobile shows bold/italic/underline in the docked bar above the keyboard instead (see initMobileNotesBar)
+    if (isMobileViewport()) { hideFormatToolbar(); return; }
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideFormatToolbar(); return; }
     const anchor = sel.anchorNode;
@@ -1153,7 +1170,10 @@ function closeRowMenu() {
     if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
 }
 
-function openRowMenu(e, todo, uid) {
+// alwaysAbove: used by the mobile docked bar, where the bar sits right above the keyboard —
+// window.innerHeight doesn't shrink for the keyboard on iOS, so the normal space-below check
+// would misjudge there's room below and place the menu behind the keyboard.
+function openRowMenu(e, todo, uid, { alwaysAbove = false } = {}) {
     e.stopPropagation();
     closeRowMenu();
 
@@ -1174,7 +1194,7 @@ function openRowMenu(e, todo, uid) {
     document.body.appendChild(menu);
     const rect = e.currentTarget.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const top = spaceBelow >= menu.offsetHeight + 8 ? rect.bottom + 4 : rect.top - menu.offsetHeight - 4;
+    const top = (!alwaysAbove && spaceBelow >= menu.offsetHeight + 8) ? rect.bottom + 4 : rect.top - menu.offsetHeight - 4;
     menu.style.left = `${rect.left}px`;
     menu.style.top = `${Math.max(4, top)}px`;
 
@@ -1402,31 +1422,58 @@ function handleDrop(draggedId, prevId, nextId) {
 initDragAndDrop();
 
 // --- Mobile Notes compose bar ---
-// No mouse on mobile, so the per-row "+" (hover-only on desktop) doesn't work there.
-// Instead, dock a "+" above the keyboard while a Notes input is focused — best effort via
-// VisualViewport, since fixed-position elements don't naturally follow the keyboard on iOS.
+// No mouse on mobile, so the per-row "+" (hover-only on desktop) doesn't work there, and there's
+// nowhere for a floating selection toolbar to sensibly appear above the keyboard either. Instead,
+// dock a single bar above the keyboard while a Notes input is focused — best effort via
+// VisualViewport, since fixed-position elements don't naturally follow the keyboard on iOS. It
+// shows "+" normally, and swaps to bold/italic/underline while text is selected.
 function initMobileNotesBar() {
     let bar = null;
     let focusedNoteId = null;
 
-    const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
+    function buildPlusButtons() {
+        const btn = document.createElement('div');
+        btn.className = 'mobile-notes-bar-btn';
+        btn.textContent = '+';
+        // Keep the input focused (and keyboard open) through the tap
+        btn.addEventListener('mousedown', (e) => e.preventDefault());
+        btn.addEventListener('click', (e) => {
+            const todo = currentTodos.find(t => t.id === focusedNoteId);
+            const uid = auth.currentUser?.uid;
+            if (todo && uid) openRowMenu({ currentTarget: e.currentTarget, stopPropagation() {} }, todo, uid, { alwaysAbove: true });
+        });
+        return [btn];
+    }
+
+    function buildFormatButtons() {
+        return [['bold', 'B'], ['italic', 'I'], ['underline', 'U']].map(([cmd, label]) => {
+            const btn = document.createElement('div');
+            btn.className = `mobile-notes-bar-btn format-${cmd}`;
+            btn.textContent = label;
+            // Keep the text selection alive through the tap so execCommand has something to act on
+            btn.addEventListener('mousedown', (e) => e.preventDefault());
+            btn.addEventListener('click', () => {
+                const active = document.activeElement;
+                document.execCommand(cmd);
+                active?.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            return btn;
+        });
+    }
+
+    function setMode(mode) {
+        if (!bar || bar.dataset.mode === mode) return;
+        bar.dataset.mode = mode;
+        bar.innerHTML = '';
+        (mode === 'format' ? buildFormatButtons() : buildPlusButtons()).forEach(el => bar.appendChild(el));
+    }
 
     function ensureBar() {
         if (bar) return bar;
         bar = document.createElement('div');
         bar.className = 'mobile-notes-bar';
-        const btn = document.createElement('div');
-        btn.className = 'mobile-notes-bar-btn';
-        btn.textContent = '+';
-        // Keep the input focused (and keyboard open) through the tap
-        btn.addEventListener('pointerdown', (e) => e.preventDefault());
-        btn.addEventListener('click', (e) => {
-            const todo = currentTodos.find(t => t.id === focusedNoteId);
-            const uid = auth.currentUser?.uid;
-            if (todo && uid) openRowMenu({ currentTarget: e.currentTarget, stopPropagation() {} }, todo, uid);
-        });
-        bar.appendChild(btn);
         document.body.appendChild(bar);
+        setMode('plus');
         return bar;
     }
 
@@ -1438,9 +1485,10 @@ function initMobileNotesBar() {
     }
 
     document.addEventListener('focusin', (e) => {
-        if (!isMobile() || currentPage !== 'keepInMind' || !e.target.classList.contains('todo-input')) return;
+        if (!isMobileViewport() || currentPage !== 'keepInMind' || !e.target.classList.contains('todo-input')) return;
         focusedNoteId = e.target.dataset.id;
         ensureBar().classList.add('visible');
+        setMode('plus');
         reposition();
     });
 
@@ -1452,6 +1500,13 @@ function initMobileNotesBar() {
                 focusedNoteId = null;
             }
         }, 50);
+    });
+
+    document.addEventListener('selectionchange', () => {
+        if (!bar || !bar.classList.contains('visible') || !isMobileViewport()) return;
+        const sel = window.getSelection();
+        const hasSelection = !!sel && !sel.isCollapsed && sel.rangeCount > 0;
+        setMode(hasSelection ? 'format' : 'plus');
     });
 
     if (window.visualViewport) {

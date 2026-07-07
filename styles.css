@@ -407,6 +407,7 @@ body {
     justify-content: flex-end;
     align-items: center;
     padding: 8px 16px;
+    gap: 20px;
     background: var(--bg);
     border-top: 1px solid var(--border-subtle);
     z-index: 1600;
@@ -453,9 +454,9 @@ body {
 .format-btn:hover {
     background: var(--input-bg);
 }
-.format-btn.format-bold { font-weight: bold; }
-.format-btn.format-italic { font-style: italic; }
-.format-btn.format-underline { text-decoration: underline; }
+.format-bold { font-weight: bold; }
+.format-italic { font-style: italic; }
+.format-underline { text-decoration: underline; }
 
 /* Toggle list caret */
 .toggle-caret {
