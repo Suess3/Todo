@@ -559,24 +559,28 @@ function createToggleCaret(todo, uid) {
     caret.className = `toggle-caret${todo.collapsed ? ' closed' : ''}`;
     caret.textContent = '▼';
     caret.addEventListener('click', () => {
-        const idx = currentTodos.findIndex(t => t.id === todo.id);
+        // Read the id from the row at click time — the captured `todo` goes stale after
+        // the temp→real id swap on Enter-created rows (same pattern as createCheckbox)
+        const id = caret.closest('.todo-row')?.dataset.id;
+        if (!id || id.startsWith('_pending_')) return;
+        const idx = currentTodos.findIndex(t => t.id === id);
         if (idx === -1) return;
         const newCollapsed = !currentTodos[idx].collapsed;
         currentTodos[idx] = { ...currentTodos[idx], collapsed: newCollapsed };
 
         // Expanding an empty toggle: give it a first, empty child to type into right away
-        if (!newCollapsed && !currentTodos.some(t => t.parentId === todo.id)) {
+        if (!newCollapsed && !currentTodos.some(t => t.parentId === id)) {
             const tempId = '_pending_' + Date.now();
             const newSortOrder = Date.now();
             currentTodos = [
                 ...currentTodos.slice(0, idx + 1),
-                { id: tempId, text: '', isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId: todo.id },
+                { id: tempId, text: '', isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId: id },
                 ...currentTodos.slice(idx + 1),
             ];
             focusTarget = { id: tempId, cursor: 'start' };
             renderApp(currentTodos);
-            setCollapsed(uid, todo.id, false).catch(e => console.error(e));
-            addTodo(uid, 0, '', newSortOrder, currentPage, todo.id)
+            setCollapsed(uid, id, false).catch(e => console.error(e));
+            addTodo(uid, 0, '', newSortOrder, currentPage, id)
                 .then(newDoc => {
                     currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
                     document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
@@ -586,7 +590,7 @@ function createToggleCaret(todo, uid) {
         }
 
         renderApp(currentTodos);
-        setCollapsed(uid, todo.id, newCollapsed).catch(e => console.error(e));
+        setCollapsed(uid, id, newCollapsed).catch(e => console.error(e));
     });
     return caret;
 }
@@ -602,7 +606,14 @@ function createNoteRow(todo, uid) {
     const plusBtn = document.createElement('div');
     plusBtn.className = 'row-plus-btn';
     plusBtn.innerHTML = '+';
-    plusBtn.addEventListener('click', (e) => openRowMenu(e, todo, uid));
+    // Look the todo up at click time — the captured `todo` goes stale after the temp→real
+    // id swap on Enter-created rows (same pattern as createCheckbox)
+    plusBtn.addEventListener('click', (e) => {
+        const id = row.dataset.id;
+        if (id.startsWith('_pending_')) return;
+        const current = currentTodos.find(t => t.id === id);
+        if (current) openRowMenu(e, current, uid);
+    });
     row.appendChild(plusBtn);
 
     if (todo.isToggle) {
@@ -631,7 +642,7 @@ function createNoteRow(todo, uid) {
     });
 
     attachBlurSave(input);
-    attachNoteKeyboard(input, uid, todo);
+    attachNoteKeyboard(input, uid);
 
     row.appendChild(input);
     return row;
@@ -733,30 +744,44 @@ function plainTextLength(html) {
     return tmp.textContent.length;
 }
 
-// Splits el's content at the current cursor position: mutates el down to the "before" half
-// (removing everything after the cursor) and returns both halves as HTML strings.
+// Splits el's content at the current cursor position into "before"/"after" HTML strings, via
+// cloning rather than mutating the live element — extractContents() forces a synchronous reflow
+// on el right before the reconcile a moment later triggers another one, which is the "bump" felt
+// on Enter. Cloning into detached (never-attached) divs costs nothing layout-wise.
 function splitContentEditableAtCursor(el) {
     const sel = window.getSelection();
     if (!sel.rangeCount) return { before: el.innerHTML, after: '' };
     const range = sel.getRangeAt(0);
-    const afterRange = range.cloneRange();
+
+    const beforeRange = document.createRange();
+    beforeRange.selectNodeContents(el);
+    beforeRange.setEnd(range.endContainer, range.endOffset);
+    const beforeDiv = document.createElement('div');
+    beforeDiv.appendChild(beforeRange.cloneContents());
+
+    const afterRange = document.createRange();
     afterRange.selectNodeContents(el);
     afterRange.setStart(range.endContainer, range.endOffset);
-    const afterFragment = afterRange.extractContents();
-    const before = el.innerHTML;
-    const tempDiv = document.createElement('div');
-    tempDiv.appendChild(afterFragment);
-    return { before, after: tempDiv.innerHTML };
+    const afterDiv = document.createElement('div');
+    afterDiv.appendChild(afterRange.cloneContents());
+
+    return { before: beforeDiv.innerHTML, after: afterDiv.innerHTML };
 }
 
 // Enter/Backspace/Arrow handling for Notes rows — kept separate from attachKeyboard since
 // contenteditable has no .value/.selectionStart and Notes alone has toggle children to manage.
-function attachNoteKeyboard(input, uid, todo) {
+function attachNoteKeyboard(input, uid) {
     let enterInFlight = false;
 
-    const getSiblings = () => currentTodos
-        .filter(t => t.page === currentPage && (t.parentId || null) === (todo.parentId || null))
-        .sort((a, b) => a.sortOrder - b.sortOrder);
+    // Resolved at event time via input.dataset.id — a todo captured at attach time would go
+    // stale after the temp→real id swap or a later toggle conversion / reparent
+    const getSiblings = () => {
+        const self = currentTodos.find(t => t.id === input.dataset.id);
+        const parentKey = self ? (self.parentId || null) : null;
+        return currentTodos
+            .filter(t => t.page === currentPage && (t.parentId || null) === parentKey)
+            .sort((a, b) => a.sortOrder - b.sortOrder);
+    };
 
     const onEnter = async (e) => {
         e.preventDefault();
@@ -787,6 +812,10 @@ function attachNoteKeyboard(input, uid, todo) {
 
             currentTodos[idx] = { ...current, text: before };
             dirtyIds.add(todoId);
+            // input still shows the pre-split content since splitContentEditableAtCursor no longer
+            // mutates it directly — write it in ourselves (the dirty flag above would otherwise make
+            // the reconcile below skip it, same as the merge case)
+            input.innerHTML = before;
 
             if (isChildInsert && current.collapsed) {
                 currentTodos[idx] = { ...currentTodos[idx], collapsed: false };
@@ -1252,10 +1281,15 @@ function convertRowToToggle(todo, uid) {
     if (idx === -1) return;
     currentTodos[idx] = { ...currentTodos[idx], isToggle: true, collapsed: true };
     renderApp(currentTodos);
+    // Same snap-back guard as drag & drop: clicking "+" blurs the input, whose save can produce
+    // a snapshot that still has isToggle=false — keep it from reverting the optimistic caret
+    dirtyIds.add(todo.id);
     Promise.all([
         setIsToggle(uid, todo.id, true),
         setCollapsed(uid, todo.id, true),
-    ]).catch(e => { showToast('Failed to convert', 'error'); console.error(e); });
+    ])
+        .then(() => dirtyIds.delete(todo.id))
+        .catch(e => { dirtyIds.delete(todo.id); showToast('Failed to convert', 'error'); console.error(e); });
 }
 
 document.addEventListener('pointerdown', (e) => {
@@ -1484,7 +1518,11 @@ function initMobileNotesBar() {
         // Keep the input focused (and keyboard open) through the tap
         btn.addEventListener('mousedown', (e) => e.preventDefault());
         btn.addEventListener('click', (e) => {
-            const todo = currentTodos.find(t => t.id === focusedNoteId);
+            // Prefer the live focused input's id — focusedNoteId can hold a temp id that was
+            // swapped for the real one while the input stayed focused
+            const active = document.activeElement;
+            const id = active?.classList?.contains('todo-input') ? active.dataset.id : focusedNoteId;
+            const todo = currentTodos.find(t => t.id === id);
             const uid = auth.currentUser?.uid;
             if (todo && uid) openRowMenu({ currentTarget: e.currentTarget, stopPropagation() {} }, todo, uid, { alwaysAbove: true });
         });
