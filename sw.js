@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todo-v99';
+const CACHE_NAME = 'todo-v100';
 
 const PRECACHE = [
     './',
@@ -8,6 +8,11 @@ const PRECACHE = [
     './src/firebase.js',
     './src/auth.js',
     './src/render.js',
+    './src/notes.js',
+    './src/dragdrop.js',
+    './src/save.js',
+    './src/store.js',
+    './src/feedback.js',
     './src/settings.js',
     './src/todoService.js',
     './src/i18n.js',
@@ -20,10 +25,16 @@ const PRECACHE = [
     'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js',
 ];
 
-// On install: cache all app shell files
+// On install: cache all app shell files.
+// cache: 'reload' makes every precache request bypass the browser's HTTP cache —
+// GitHub Pages serves with max-age=600, so within 10 minutes of a deploy addAll
+// would otherwise happily mix stale files into the brand-new cache (e.g. an old
+// version.js next to a new render.js).
 self.addEventListener('install', event => {
     event.waitUntil(
-        caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE))
+        caches.open(CACHE_NAME).then(cache =>
+            cache.addAll(PRECACHE.map(url => new Request(url, { cache: 'reload' })))
+        )
     );
     self.skipWaiting(); // Force update for this transition
 });
