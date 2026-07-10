@@ -48,6 +48,14 @@ const translations = {
         no_tasks: 'No tasks (tap to add)',
         no_items: 'No items (tap to add)',
         toggle_list: 'Toggle list',
+        auth_created: 'Account created! Please sign in.',
+        auth_err_wrong_credentials: 'Incorrect email or password.',
+        auth_err_invalid_email: 'Please enter a valid email address.',
+        auth_err_email_in_use: 'This email is already registered.',
+        auth_err_weak_password: 'Password must be at least 6 characters.',
+        auth_err_too_many: 'Too many attempts — please try again later.',
+        auth_err_network: 'No connection — please check your internet.',
+        auth_err_generic: 'Something went wrong. Please try again.',
     },
     de: {
         settings: 'Einstellungen',
@@ -96,6 +104,14 @@ const translations = {
         no_tasks: 'Keine Aufgaben (tippen zum Hinzufügen)',
         no_items: 'Keine Einträge (tippen zum Hinzufügen)',
         toggle_list: 'Ausklappliste',
+        auth_created: 'Konto erstellt! Bitte anmelden.',
+        auth_err_wrong_credentials: 'E-Mail oder Passwort ist falsch.',
+        auth_err_invalid_email: 'Bitte eine gültige E-Mail-Adresse eingeben.',
+        auth_err_email_in_use: 'Diese E-Mail ist bereits registriert.',
+        auth_err_weak_password: 'Das Passwort braucht mindestens 6 Zeichen.',
+        auth_err_too_many: 'Zu viele Versuche — bitte später erneut versuchen.',
+        auth_err_network: 'Keine Verbindung — bitte Internet prüfen.',
+        auth_err_generic: 'Etwas ist schiefgelaufen. Bitte erneut versuchen.',
     }
 };
 

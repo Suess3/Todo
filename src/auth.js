@@ -5,8 +5,26 @@ import {
     signOut,
     onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { t } from './i18n.js';
 
 let suppressAuthChange = false;
+
+// Raw Firebase errors ("Firebase: Error (auth/invalid-credential).") are unreadable and
+// leak whether an email is registered — map the codes we can act on to friendly strings.
+const AUTH_ERROR_KEYS = {
+    'auth/invalid-credential': 'auth_err_wrong_credentials',
+    'auth/wrong-password': 'auth_err_wrong_credentials',
+    'auth/user-not-found': 'auth_err_wrong_credentials',
+    'auth/invalid-email': 'auth_err_invalid_email',
+    'auth/email-already-in-use': 'auth_err_email_in_use',
+    'auth/weak-password': 'auth_err_weak_password',
+    'auth/too-many-requests': 'auth_err_too_many',
+    'auth/network-request-failed': 'auth_err_network',
+};
+
+function friendlyAuthError(err) {
+    return t(AUTH_ERROR_KEYS[err?.code] || 'auth_err_generic');
+}
 
 export function initAuth(onSignIn, onSignOut) {
     let initialResolved = false;
@@ -100,12 +118,13 @@ export function renderAuthScreen() {
                 document.getElementById('auth-email').value = email;
                 document.getElementById('auth-password').value = '';
                 errorEl.style.color = '#6fcf6f';
-                errorEl.textContent = 'Account created! Please sign in.';
+                errorEl.textContent = t('auth_created');
                 errorEl.classList.remove('hidden');
             }
         } catch (err) {
+            console.error('auth:', err);
             errorEl.style.color = '#ff6b6b';
-            errorEl.textContent = err.message;
+            errorEl.textContent = friendlyAuthError(err);
             errorEl.classList.remove('hidden');
         }
     });
