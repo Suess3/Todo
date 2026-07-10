@@ -82,10 +82,16 @@ export function renderAuthScreen() {
             if (mode === 'signin') {
                 await signInWithEmailAndPassword(auth, email, password);
             } else {
+                // Suppress the auth listener during the create+signout dance so the app
+                // doesn't flash open. Reset in finally — if createUser throws (email in
+                // use, weak password) a stuck flag would swallow every future sign-in.
                 suppressAuthChange = true;
-                await createUserWithEmailAndPassword(auth, email, password);
-                await signOut(auth);
-                suppressAuthChange = false;
+                try {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                    await signOut(auth);
+                } finally {
+                    suppressAuthChange = false;
+                }
                 // Switch to sign-in tab and show success
                 mode = 'signin';
                 document.getElementById('tab-signup').classList.remove('active');
