@@ -31,7 +31,9 @@ export async function moveTodos(uid) {
     toMove.forEach(docSnap => {
         batch.update(docSnap.ref, {
             dateEpochDay: today,
-            moveCount: (docSnap.data().moveCount || 0) + 1
+            // increment() instead of read+1: two devices doing the morning move
+            // concurrently would otherwise both write the same stale count
+            moveCount: increment(1)
         });
     });
     await batch.commit();
