@@ -595,6 +595,43 @@ function createToggleCaret(todo, uid) {
     return caret;
 }
 
+// --- Notes HTML sanitizer ---
+
+// Notes store their rich text as an HTML snippet, so anything in Firestore ends up in
+// innerHTML. The security rules only let an account write its own docs, but a snippet
+// written around the app (e.g. straight through the Firestore API) must still never
+// execute here — strip everything except the formatting our own toolbar can produce.
+const NOTE_ALLOWED_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'BR', 'FONT', 'SPAN']);
+// execCommand('foreColor') emits <font color="…"> or <span style="color:…"> depending
+// on the browser; only plain color values pass, nothing url()- or expression-shaped
+const NOTE_COLOR_VALUE = /^(#[0-9a-f]{3,8}|rgba?\([\d.,\s%]+\)|[a-z]+)$/i;
+const NOTE_STYLE_COLOR = /^color:\s*([^;]+);?\s*$/i;
+
+function sanitizeNoteHtml(html) {
+    const tmpl = document.createElement('template');
+    tmpl.innerHTML = html;
+
+    (function clean(parent) {
+        for (const el of [...parent.children]) {
+            clean(el);
+            if (!NOTE_ALLOWED_TAGS.has(el.tagName)) {
+                el.replaceWith(...el.childNodes); // keep the text, drop the tag
+                continue;
+            }
+            for (const attr of [...el.attributes]) {
+                const v = attr.value.trim();
+                const keep =
+                    (el.tagName === 'FONT' && attr.name === 'color' && NOTE_COLOR_VALUE.test(v)) ||
+                    (el.tagName === 'SPAN' && attr.name === 'style' &&
+                        NOTE_STYLE_COLOR.test(v) && NOTE_COLOR_VALUE.test(v.match(NOTE_STYLE_COLOR)[1].trim()));
+                if (!keep) el.removeAttribute(attr.name);
+            }
+        }
+    })(tmpl.content);
+
+    return tmpl.innerHTML;
+}
+
 // --- Row create / update (Notes: contenteditable, so bold/italic/underline can be applied) ---
 
 function createNoteRow(todo, uid) {
@@ -624,7 +661,7 @@ function createNoteRow(todo, uid) {
     input.dataset.id = todo.id;
     input.className = `todo-input${todo.isDone ? ' done' : ''}`;
     input.contentEditable = 'true';
-    input.innerHTML = todo.text;
+    input.innerHTML = sanitizeNoteHtml(todo.text);
 
     input.addEventListener('input', () => {
         const id = input.dataset.id;
@@ -668,7 +705,10 @@ function updateNoteRow(row, todo, uid) {
     input.classList.toggle('done', todo.isDone);
 
     if (document.activeElement !== input && !dirtyIds.has(todo.id)) {
-        if (input.innerHTML !== todo.text) input.innerHTML = todo.text;
+        // Compare against the sanitized form — comparing raw todo.text would re-write
+        // (and re-sanitize) the node on every render whenever the two differ
+        const safe = sanitizeNoteHtml(todo.text);
+        if (input.innerHTML !== safe) input.innerHTML = safe;
     }
 }
 
@@ -738,10 +778,11 @@ function placeCaretAtTextOffset(el, offset) {
 
 // Visible-character length of an HTML snippet, ignoring tags — used to find the exact join
 // point when merging two notes so the cursor can land there instead of at the very end.
+// Parsed inside a <template>: its content is inert, so nothing in the snippet can load or run.
 function plainTextLength(html) {
-    const tmp = document.createElement('div');
-    tmp.innerHTML = html;
-    return tmp.textContent.length;
+    const tmpl = document.createElement('template');
+    tmpl.innerHTML = html;
+    return tmpl.content.textContent.length;
 }
 
 // Splits el's content at the current cursor position into "before"/"after" HTML strings, via
@@ -957,7 +998,7 @@ function attachNoteKeyboard(input, uid) {
                 // Write the merge straight into prev's DOM node — the dirty flag we just set
                 // would otherwise make the reconcile below skip refreshing its (already-rendered) content
                 const prevEl = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
-                if (prevEl) prevEl.innerHTML = mergedText;
+                if (prevEl) prevEl.innerHTML = sanitizeNoteHtml(mergedText);
                 promoteChildren(uid, todoId);
                 currentTodos = currentTodos.filter(t => t.id !== todoId);
                 dirtyIds.delete(todoId);
