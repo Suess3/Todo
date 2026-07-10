@@ -1,0 +1,4 @@
+# Normalize all text files to LF — development happens on both macOS and
+# Windows, and without this the Windows machine turns every touched file
+# into a whole-file CRLF diff.
+* text=auto eol=lf
