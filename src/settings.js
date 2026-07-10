@@ -13,19 +13,27 @@ export function getUrgencyIntensity() {
     return parseInt(localStorage.getItem(URGENCY_KEY) ?? '50');
 }
 
+// These vars must be set on <body>, not <html>: data-theme lives on body and the
+// [data-theme="light"] block redefines them there, so an inline style on html would
+// be shadowed by body's own declaration (the light-mode "sliders do nothing" bug).
 export function applyAccent() {
     const hue = parseInt(localStorage.getItem(ACCENT_KEY) ?? '217');
-    document.documentElement.style.setProperty('--accent', `hsl(${hue}, 80%, 60%)`);
+    document.body.style.setProperty('--accent', `hsl(${hue}, 80%, 60%)`);
 }
 
-const _noiseSvg = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/></filter><rect width='200' height='200' filter='url(#n)'/></svg>`;
+// Grain is generated noise, not a solid ink color: the dark-mode version shows light
+// speckles on the dark bg, so light mode needs a black-speckle version (feColorMatrix
+// zeroes RGB, keeps the turbulence alpha) to be visible on white.
+const _noiseSvgDark  = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/></filter><rect width='200' height='200' filter='url(#n)'/></svg>`;
+const _noiseSvgLight = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/><feColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0'/></filter><rect width='200' height='200' filter='url(#n)'/></svg>`;
 // Pattern ink follows the theme — white lines are invisible on the light theme's
 // white background, so light mode draws with black instead
 function getPatterns(isLight) {
     const ink = isLight ? '0,0,0' : '255,255,255';
+    const noise = isLight ? _noiseSvgLight : _noiseSvgDark;
     return {
         none: null,
-        grain: `url("data:image/svg+xml,${encodeURIComponent(_noiseSvg)}")`,
+        grain: `url("data:image/svg+xml,${encodeURIComponent(noise)}")`,
         dots: `radial-gradient(circle, rgba(${ink},0.7) 1px, transparent 1px)`,
         grid: `linear-gradient(rgba(${ink},0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(${ink},0.5) 1px, transparent 1px)`,
         diagonal: `repeating-linear-gradient(45deg, transparent 0px, transparent 18px, rgba(${ink},0.6) 18px, rgba(${ink},0.6) 19px)`,
@@ -76,9 +84,9 @@ export function applyBgBrightness() {
         surface = Math.round(30 + (value / 100) * 72);
         modal = surface;
     }
-    document.documentElement.style.setProperty('--bg', hex(bg));
-    document.documentElement.style.setProperty('--input-bg', hex(surface));
-    document.documentElement.style.setProperty('--modal-bg', hex(modal));
+    document.body.style.setProperty('--bg', hex(bg));
+    document.body.style.setProperty('--input-bg', hex(surface));
+    document.body.style.setProperty('--modal-bg', hex(modal));
 }
 
 function getBannerPos() {
