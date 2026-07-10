@@ -10,6 +10,7 @@ const PRECACHE = [
     './src/render.js',
     './src/settings.js',
     './src/todoService.js',
+    './src/i18n.js',
     './src/charts.js',
     './src/animations.js',
     './src/version.js',
