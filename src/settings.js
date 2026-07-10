@@ -43,7 +43,7 @@ export function applyPattern() {
         overlay.style.opacity = '0';
         return;
     }
-    // Map 0–100 → 0.01–0.08 (neurowissenschaftlich sinnvoller Bereich)
+    // Map 0–100 → 0.01–0.08 — kept deliberately subtle, anything stronger distracts
     const value = parseInt(localStorage.getItem(BG_PATTERN_OPACITY_KEY) ?? '30');
     const opacity = 0.01 + (value / 100) * 0.07;
     overlay.style.backgroundImage = PATTERNS[pattern];
