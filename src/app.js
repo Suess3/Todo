@@ -17,7 +17,8 @@ if ('serviceWorker' in navigator) {
 import { initAuth, renderAuthScreen, signOutUser } from './auth.js';
 import { initCharts } from './charts.js';
 import { moveTodos, subscribeTodos, cleanupNotes } from './todoService.js';
-import { scheduleRender, flushDirty, setPage } from './render.js';
+import { scheduleRender, setPage } from './render.js';
+import { flushDirty } from './save.js';
 import { applyTheme, applyAccent, applyBgBrightness, applyPattern, applyBannerPhoto, initBannerDrag, initSettings } from './settings.js';
 
 let unsubscribe = null;

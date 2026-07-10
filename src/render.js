@@ -1,48 +1,24 @@
+// Core renderer: DOM-diffing reconciliation, the calendar view (todo) and the
+// flat views (soon/longRun/keepInMind), plus the textarea-based row handling.
+// Notes-specific code lives in notes.js, drag & drop in dragdrop.js, save logic
+// in save.js, shared state in store.js.
+
 import { auth } from './firebase.js';
-import { getTodayEpoch, addTodo, toggleTodo, updateTodoText, updateSortOrder, deleteTodo, recordProductivity, setIsToggle, setCollapsed, setParent } from './todoService.js';
+import { getTodayEpoch, addTodo, toggleTodo, deleteTodo, recordProductivity } from './todoService.js';
 import { getUrgencyIntensity } from './settings.js';
 import { triggerCheckAnimation, triggerCascade } from './animations.js';
 import { t } from './i18n.js';
-const expandedStates = {};
-const dirtyIds = new Set();
+import { todos, setTodos, dirtyIds, currentPage, setCurrentPage, focusTarget, setFocusTarget, flatDepthMap, setRenderer } from './store.js';
+import { showToast } from './feedback.js';
+import { scheduleSave, attachBlurSave, commitTempTodo } from './save.js';
+import { createNoteRow, updateNoteRow, placeCaretAtStart, placeCaretAtEnd, placeCaretAtTextOffset } from './notes.js';
+import './dragdrop.js';
 
-let currentTodos = [];
-let focusTarget = null; // { id, cursor } — focus a specific input after next render
-let currentPage = 'todo';
+const expandedStates = {};
 let isAnimating = false;
 let animationCancelToken = null;
 
 const ANIM_KEY = 'todo-animated-day';
-const saveTimers = new Map();
-
-function updateSaveStatus(status) {
-    const el = document.getElementById('save-status');
-    if (!el) return;
-    el.classList.remove('hidden', 'error');
-    if (status === 'saving') {
-        el.textContent = 'Saving…';
-    } else if (status === 'error') {
-        el.textContent = 'Save failed';
-        el.classList.add('error');
-    } else {
-        el.classList.add('hidden');
-    }
-}
-
-export function showToast(message, type = 'info') {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.textContent = message;
-    container.appendChild(toast);
-    setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateY(10px)';
-        toast.style.transition = 'opacity 0.3s, transform 0.3s';
-        setTimeout(() => toast.remove(), 300);
-    }, 4000);
-}
 
 const PASTEL_COLORS = ['#F0DC8A', '#F0C880', '#F0B478', '#F0A074', '#EE9090'];
 const VIVID_COLORS  = ['#E8C420', '#E89028', '#E06828', '#D44A28', '#C83232'];
@@ -67,8 +43,10 @@ function urgencyColor(moveCount, intensity) {
     }
 }
 
-document.addEventListener('urgency-changed', () => renderApp(currentTodos));
-document.addEventListener('lang-changed', () => renderApp(currentTodos));
+document.addEventListener('urgency-changed', () => renderApp(todos));
+document.addEventListener('lang-changed', () => renderApp(todos));
+
+// --- Typing animation (first open of the day) ---
 
 function shouldAnimate(todayEpoch) {
     const last = parseInt(localStorage.getItem(ANIM_KEY) || '0');
@@ -110,9 +88,14 @@ async function typeInputs(inputs) {
     if (!token.cancelled) {
         isAnimating = false;
         animationCancelToken = null;
-        renderApp(currentTodos);
+        renderApp(todos);
     }
 }
+
+// Cancel the typing animation on any user interaction so the UI stays fully responsive
+document.addEventListener('pointerdown', () => {
+    if (isAnimating) cancelTypingAnimation();
+}, { capture: true });
 
 // --- Checkbox ---
 
@@ -127,7 +110,7 @@ function createCheckbox(uid, isDone, todayUnchecked = false) {
     wrapper.addEventListener('click', () => {
         const id = wrapper.closest('.todo-row')?.dataset.id;
         if (!id || id.startsWith('_pending_')) return;
-        const current = currentTodos.find(t => t.id === id);
+        const current = todos.find(t => t.id === id);
         if (!current) return;
         const newState = !current.isDone;
         if (newState) {
@@ -138,7 +121,7 @@ function createCheckbox(uid, isDone, todayUnchecked = false) {
                     .catch(e => console.error('recordProductivity failed:', e));
                 // Fire cascade if this was the last unchecked todo for today
                 const today = getTodayEpoch();
-                const todayTodos = currentTodos.filter(t => t.dateEpochDay === today && (!t.page || t.page === 'todo') && t.text.trim() !== '');
+                const todayTodos = todos.filter(t => t.dateEpochDay === today && (!t.page || t.page === 'todo') && t.text.trim() !== '');
                 const allDoneAfterThis = todayTodos.length > 0 && todayTodos.every(t => t.id === id || t.isDone);
                 if (allDoneAfterThis) setTimeout(triggerCascade, 400);
             }
@@ -159,107 +142,30 @@ function updateCheckbox(wrapper, isDone, todayUnchecked) {
     box.textContent = isDone ? '✓' : '';
 }
 
-// --- Save logic ---
-
-function scheduleSave(id, inputEl) {
-    clearTimeout(saveTimers.get(id));
-    saveTimers.set(id, setTimeout(async () => {
-        saveTimers.delete(id);
-        const currentId = inputEl.dataset.id;
-        if (currentId.startsWith('_pending_')) return;
-        const uid = auth.currentUser?.uid;
-        if (!uid || !dirtyIds.has(currentId)) return;
-        const todo = currentTodos.find(t => t.id === currentId);
-        if (!todo) return;
-        dirtyIds.delete(currentId);
-        updateSaveStatus('saving');
-        try { 
-            await updateTodoText(uid, currentId, todo.text); 
-            updateSaveStatus('idle');
-        } catch (e) { 
-            dirtyIds.add(currentId); 
-            updateSaveStatus('error');
-            showToast('Failed to save changes', 'error');
-            console.error(e);
-        }
-    }, 2000));
-}
-
-function attachBlurSave(input) {
-    input.addEventListener('blur', async () => {
-        const id = input.dataset.id;
-        clearTimeout(saveTimers.get(id));
-        saveTimers.delete(id);
-        if (id.startsWith('_pending_')) return;
-        const uid = auth.currentUser?.uid;
-        if (!uid || !dirtyIds.has(id)) return;
-        const todo = currentTodos.find(t => t.id === id);
-        if (!todo) return;
-        dirtyIds.delete(id);
-        updateSaveStatus('saving');
-        try { 
-            await updateTodoText(uid, id, todo.text); 
-            updateSaveStatus('idle');
-        } catch (e) { 
-            dirtyIds.add(id); 
-            updateSaveStatus('error');
-            showToast('Failed to save changes', 'error');
-            console.error(e);
-        }
-    });
-}
-
 // --- Public API ---
 
 export function setPage(page) {
     cancelTypingAnimation();
-    currentPage = page;
-    renderApp(currentTodos);
+    setCurrentPage(page);
+    renderApp(todos);
 }
 
-export async function flushDirty() {
-    const uid = auth.currentUser?.uid;
-    if (!uid || dirtyIds.size === 0) return;
-    const ids = [...dirtyIds].filter(id => !id.startsWith('_pending_'));
-    if (ids.length === 0) return;
-    
-    updateSaveStatus('saving');
-    try {
-        await Promise.all(ids.map(async id => {
-            const todo = currentTodos.find(t => t.id === id);
-            if (!todo) return;
-            dirtyIds.delete(id);
-            try { await updateTodoText(uid, id, todo.text); }
-            catch (e) { 
-                dirtyIds.add(id); 
-                throw e;
-            }
-        }));
-        updateSaveStatus('idle');
-    } catch (e) {
-        updateSaveStatus('error');
-        showToast('Sync failed', 'error');
-        console.error(e);
-    }
-}
-
-
-export function scheduleRender(todos) {
+export function scheduleRender(newTodos) {
     // Preserve unsaved local edits — don't let Firestore overwrite in-flight text
-    const pendingTodos = currentTodos.filter(t => t.id.startsWith('_pending_'));
-    currentTodos = todos.map(t => {
+    const pendingTodos = todos.filter(t => t.id.startsWith('_pending_'));
+    setTodos(newTodos.map(t => {
         if (dirtyIds.has(t.id)) {
-            const local = currentTodos.find(l => l.id === t.id);
+            const local = todos.find(l => l.id === t.id);
             return local || t;
         }
         return t;
-    });
+    }));
     // Skip re-render while an Enter is in flight — avoids losing the temp todo + focus
     if (pendingTodos.length > 0) return;
     // Skip re-render while user is actively editing — insertBefore triggers iOS keyboard dismissal
     // Only skip if todo inputs are already in the DOM (i.e. not the initial render)
     if (document.querySelector('.todo-input') && document.activeElement?.classList.contains('todo-input')) return;
-    renderApp(currentTodos);
+    renderApp(todos);
 }
 
 // --- Format helpers ---
@@ -273,24 +179,13 @@ function getDayName(epoch) {
     return t('day_' + new Date(epoch * 86400000).getDay());
 }
 
-// --- Keyboard handlers ---
+// --- Keyboard handler (textarea-based rows: todo/soon/longRun) ---
 
-// Attached once per input on creation; reads current todo state from currentTodos at event time
+// Attached once per input on creation; reads current todo state from the store at event time
 // so it stays correct across reconciliation cycles without needing to be re-attached.
 // getSiblings()                    → filtered list of todos for this view (for nav / backspace)
 // makeTempTodo(tempId, after, s)   → optimistic todo object to insert locally
 // persistTodo(after, sortOrder)    → calls addTodo with the right page/date args
-// Deleting a toggle shouldn't orphan its children — reparent them to the toggle's own parent first.
-// Shared with attachNoteKeyboard (Notes); no-op elsewhere since only Notes todos have parentId set.
-function promoteChildren(uid, todoId) {
-    const children = currentTodos.filter(t => t.parentId === todoId);
-    if (children.length === 0) return;
-    const deleted = currentTodos.find(t => t.id === todoId);
-    const newParentId = deleted?.parentId || null;
-    currentTodos = currentTodos.map(t => t.parentId === todoId ? { ...t, parentId: newParentId } : t);
-    children.forEach(c => setParent(uid, c.id, newParentId).catch(e => console.error(e)));
-}
-
 function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
     let enterInFlight = false;
 
@@ -308,43 +203,28 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
             const cursor = input.selectionStart;
             const before = input.value.slice(0, cursor);
             const after = input.value.slice(cursor);
-            const idx = currentTodos.findIndex(t => t.id === todoId);
+            const idx = todos.findIndex(t => t.id === todoId);
             if (idx === -1) return;
             const sibIdx = siblings.findIndex(t => t.id === todoId);
             const nextSib = siblings[sibIdx + 1];
-            const currentOrder = currentTodos[idx].sortOrder;
+            const currentOrder = todos[idx].sortOrder;
             const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
             const newSortOrder = (currentOrder + nextOrder) / 2;
 
-            currentTodos[idx] = { ...currentTodos[idx], text: before };
+            todos[idx] = { ...todos[idx], text: before };
             dirtyIds.add(todoId);
 
             // Optimistic: insert temp todo locally so focus lands immediately
             const tempId = '_pending_' + Date.now();
-            currentTodos = [
-                ...currentTodos.slice(0, idx + 1),
+            setTodos([
+                ...todos.slice(0, idx + 1),
                 makeTempTodo(tempId, after, newSortOrder),
-                ...currentTodos.slice(idx + 1),
-            ];
-            focusTarget = { id: tempId, cursor: 0 };
-            renderApp(currentTodos);
+                ...todos.slice(idx + 1),
+            ]);
+            setFocusTarget({ id: tempId, cursor: 0 });
+            renderApp(todos);
 
-            try {
-                updateSaveStatus('saving');
-                const newDoc = await persistTodo(after, newSortOrder);
-                updateSaveStatus('idle');
-
-                // Swap temp id for real id in state and DOM — avoids a full re-render that would close mobile keyboard
-                currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-                if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
-                document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
-            } catch (e) {
-                updateSaveStatus('error');
-                showToast('Failed to create todo', 'error');
-                currentTodos = currentTodos.filter(t => t.id !== tempId);
-                renderApp(currentTodos);
-                console.error(e);
-            }
+            await commitTempTodo(tempId, persistTodo(after, newSortOrder));
         } finally {
             enterInFlight = false;
         }
@@ -364,34 +244,34 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
             const prev = siblings[sibIdx - 1];
 
             if (!prev && input.value === '') {
-                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
-                renderApp(currentTodos);
+                renderApp(todos);
                 deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
                 return;
             }
             if (!prev) return;
 
             if (input.value === '') {
-                focusTarget = { id: prev.id, cursor: prev.text.length };
-                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                setFocusTarget({ id: prev.id, cursor: prev.text.length });
+                setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
-                renderApp(currentTodos);
+                renderApp(todos);
                 deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
             } else {
                 const mergedText = prev.text + input.value;
                 const splitCursor = prev.text.length;
-                const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
-                currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
+                const prevIdx = todos.findIndex(t => t.id === prev.id);
+                todos[prevIdx] = { ...todos[prevIdx], text: mergedText };
                 dirtyIds.add(prev.id);
                 // Write the merge straight into prev's DOM node — the dirty flag we just set
                 // would otherwise make the reconcile below skip refreshing its (already-rendered) value
                 const prevEl = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
                 if (prevEl) prevEl.value = mergedText;
-                currentTodos = currentTodos.filter(t => t.id !== todoId);
+                setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
-                focusTarget = { id: prev.id, cursor: splitCursor };
-                renderApp(currentTodos);
+                setFocusTarget({ id: prev.id, cursor: splitCursor });
+                renderApp(todos);
                 deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
             }
         }
@@ -457,8 +337,8 @@ function createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensi
 
     input.addEventListener('input', () => {
         const id = input.dataset.id;
-        const idx = currentTodos.findIndex(t => t.id === id);
-        if (idx !== -1) currentTodos[idx] = { ...currentTodos[idx], text: input.value };
+        const idx = todos.findIndex(t => t.id === id);
+        if (idx !== -1) todos[idx] = { ...todos[idx], text: input.value };
         dirtyIds.add(id);
         scheduleSave(id, input);
     });
@@ -466,7 +346,7 @@ function createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensi
     attachBlurSave(input);
     attachKeyboard(
         input, uid,
-        () => currentTodos.filter(t => t.dateEpochDay === dateEpoch),
+        () => todos.filter(t => t.dateEpochDay === dateEpoch),
         (tempId, after, s) => ({ id: tempId, text: after, isDone: false, dateEpochDay: dateEpoch, sortOrder: s, moveCount: 0 }),
         (after, s) => addTodo(uid, dateEpoch, after, s)
     );
@@ -491,7 +371,7 @@ function updateCalendarRow(row, todo, isToday, isPast, urgencyIntensity) {
     }
 }
 
-// --- Row create / update (flat) ---
+// --- Row create / update (flat: soon/longRun) ---
 
 function createFlatRow(todo, uid) {
     const row = document.createElement('div');
@@ -516,8 +396,8 @@ function createFlatRow(todo, uid) {
 
     input.addEventListener('input', () => {
         const id = input.dataset.id;
-        const idx = currentTodos.findIndex(t => t.id === id);
-        if (idx !== -1) currentTodos[idx] = { ...currentTodos[idx], text: input.value };
+        const idx = todos.findIndex(t => t.id === id);
+        if (idx !== -1) todos[idx] = { ...todos[idx], text: input.value };
         dirtyIds.add(id);
         scheduleSave(id, input);
         autoGrow();
@@ -526,7 +406,7 @@ function createFlatRow(todo, uid) {
     attachBlurSave(input);
     attachKeyboard(
         input, uid,
-        () => currentTodos.filter(t => t.page === currentPage),
+        () => todos.filter(t => t.page === currentPage),
         (tempId, after, s) => ({ id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: s, moveCount: 0, page: currentPage }),
         (after, s) => addTodo(uid, 0, after, s, currentPage)
     );
@@ -554,596 +434,12 @@ function updateFlatRow(row, todo) {
     }
 }
 
-function createToggleCaret(todo, uid) {
-    const caret = document.createElement('div');
-    caret.className = `toggle-caret${todo.collapsed ? ' closed' : ''}`;
-    caret.textContent = '▼';
-    caret.addEventListener('click', () => {
-        // Read the id from the row at click time — the captured `todo` goes stale after
-        // the temp→real id swap on Enter-created rows (same pattern as createCheckbox)
-        const id = caret.closest('.todo-row')?.dataset.id;
-        if (!id || id.startsWith('_pending_')) return;
-        const idx = currentTodos.findIndex(t => t.id === id);
-        if (idx === -1) return;
-        const newCollapsed = !currentTodos[idx].collapsed;
-        currentTodos[idx] = { ...currentTodos[idx], collapsed: newCollapsed };
-
-        // Expanding an empty toggle: give it a first, empty child to type into right away
-        if (!newCollapsed && !currentTodos.some(t => t.parentId === id)) {
-            const tempId = '_pending_' + Date.now();
-            const newSortOrder = Date.now();
-            currentTodos = [
-                ...currentTodos.slice(0, idx + 1),
-                { id: tempId, text: '', isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId: id },
-                ...currentTodos.slice(idx + 1),
-            ];
-            focusTarget = { id: tempId, cursor: 'start' };
-            renderApp(currentTodos);
-            setCollapsed(uid, id, false).catch(e => console.error(e));
-            addTodo(uid, 0, '', newSortOrder, currentPage, id)
-                .then(newDoc => {
-                    currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-                    document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
-                })
-                .catch(e => { showToast('Failed to create item', 'error'); console.error(e); });
-            return;
-        }
-
-        renderApp(currentTodos);
-        setCollapsed(uid, id, newCollapsed).catch(e => console.error(e));
-    });
-    return caret;
-}
-
-// --- Notes HTML sanitizer ---
-
-// Notes store their rich text as an HTML snippet, so anything in Firestore ends up in
-// innerHTML. The security rules only let an account write its own docs, but a snippet
-// written around the app (e.g. straight through the Firestore API) must still never
-// execute here — strip everything except the formatting our own toolbar can produce.
-const NOTE_ALLOWED_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'BR', 'FONT', 'SPAN']);
-// execCommand('foreColor') emits <font color="…"> or <span style="color:…"> depending
-// on the browser; only plain color values pass, nothing url()- or expression-shaped
-const NOTE_COLOR_VALUE = /^(#[0-9a-f]{3,8}|rgba?\([\d.,\s%]+\)|[a-z]+)$/i;
-const NOTE_STYLE_COLOR = /^color:\s*([^;]+);?\s*$/i;
-
-function sanitizeNoteHtml(html) {
-    const tmpl = document.createElement('template');
-    tmpl.innerHTML = html;
-
-    (function clean(parent) {
-        for (const el of [...parent.children]) {
-            clean(el);
-            if (!NOTE_ALLOWED_TAGS.has(el.tagName)) {
-                el.replaceWith(...el.childNodes); // keep the text, drop the tag
-                continue;
-            }
-            for (const attr of [...el.attributes]) {
-                const v = attr.value.trim();
-                const keep =
-                    (el.tagName === 'FONT' && attr.name === 'color' && NOTE_COLOR_VALUE.test(v)) ||
-                    (el.tagName === 'SPAN' && attr.name === 'style' &&
-                        NOTE_STYLE_COLOR.test(v) && NOTE_COLOR_VALUE.test(v.match(NOTE_STYLE_COLOR)[1].trim()));
-                if (!keep) el.removeAttribute(attr.name);
-            }
-        }
-    })(tmpl.content);
-
-    return tmpl.innerHTML;
-}
-
-// --- Row create / update (Notes: contenteditable, so bold/italic/underline can be applied) ---
-
-function createNoteRow(todo, uid) {
-    const row = document.createElement('div');
-    row.className = `todo-row${todo.isDone ? ' done' : ''}`;
-    row.dataset.id = todo.id;
-    row.style.paddingLeft = `${(flatDepthMap.get(todo.id) || 0) * 20}px`;
-
-    const plusBtn = document.createElement('div');
-    plusBtn.className = 'row-plus-btn';
-    plusBtn.innerHTML = '+';
-    // Look the todo up at click time — the captured `todo` goes stale after the temp→real
-    // id swap on Enter-created rows (same pattern as createCheckbox)
-    plusBtn.addEventListener('click', (e) => {
-        const id = row.dataset.id;
-        if (id.startsWith('_pending_')) return;
-        const current = currentTodos.find(t => t.id === id);
-        if (current) openRowMenu(e, current, uid);
-    });
-    row.appendChild(plusBtn);
-
-    if (todo.isToggle) {
-        row.appendChild(createToggleCaret(todo, uid));
-    }
-
-    const input = document.createElement('div');
-    input.dataset.id = todo.id;
-    input.className = `todo-input${todo.isDone ? ' done' : ''}`;
-    input.contentEditable = 'true';
-    input.innerHTML = sanitizeNoteHtml(todo.text);
-
-    input.addEventListener('input', () => {
-        const id = input.dataset.id;
-        const idx = currentTodos.findIndex(t => t.id === id);
-        if (idx !== -1) currentTodos[idx] = { ...currentTodos[idx], text: input.innerHTML };
-        dirtyIds.add(id);
-        scheduleSave(id, input);
-    });
-
-    // Force plain-text paste — formatting only ever comes from our own bold/italic/underline toolbar
-    input.addEventListener('paste', (e) => {
-        e.preventDefault();
-        const text = (e.clipboardData || window.clipboardData).getData('text/plain');
-        document.execCommand('insertText', false, text);
-    });
-
-    attachBlurSave(input);
-    attachNoteKeyboard(input, uid);
-
-    row.appendChild(input);
-    return row;
-}
-
-function updateNoteRow(row, todo, uid) {
-    row.classList.toggle('done', todo.isDone);
-    row.style.paddingLeft = `${(flatDepthMap.get(todo.id) || 0) * 20}px`;
-
-    let caret = row.querySelector('.toggle-caret');
-    if (todo.isToggle) {
-        if (!caret) {
-            caret = createToggleCaret(todo, uid);
-            row.querySelector('.row-plus-btn').after(caret);
-        } else {
-            caret.classList.toggle('closed', !!todo.collapsed);
-        }
-    } else if (caret) {
-        caret.remove();
-    }
-
-    const input = row.querySelector('.todo-input');
-    input.classList.toggle('done', todo.isDone);
-
-    if (document.activeElement !== input && !dirtyIds.has(todo.id)) {
-        // Compare against the sanitized form — comparing raw todo.text would re-write
-        // (and re-sanitize) the node on every render whenever the two differ
-        const safe = sanitizeNoteHtml(todo.text);
-        if (input.innerHTML !== safe) input.innerHTML = safe;
-    }
-}
-
-// --- Contenteditable cursor helpers (Notes) ---
-
-function isCursorAtStart(el) {
-    const sel = window.getSelection();
-    if (!sel.rangeCount || !sel.isCollapsed) return false;
-    const range = sel.getRangeAt(0);
-    if (!el.contains(range.startContainer)) return false;
-    const preRange = document.createRange();
-    preRange.selectNodeContents(el);
-    preRange.setEnd(range.startContainer, range.startOffset);
-    return preRange.toString().length === 0;
-}
-
-function isCursorAtEnd(el) {
-    const sel = window.getSelection();
-    if (!sel.rangeCount || !sel.isCollapsed) return false;
-    const range = sel.getRangeAt(0);
-    if (!el.contains(range.startContainer)) return false;
-    const postRange = document.createRange();
-    postRange.selectNodeContents(el);
-    postRange.setStart(range.startContainer, range.startOffset);
-    return postRange.toString().length === 0;
-}
-
-function placeCaretAtStart(el) {
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(true);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-}
-
-function placeCaretAtEnd(el) {
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(false);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-}
-
-// Places the caret at a plain-text character offset, walking text nodes so it lands correctly
-// regardless of any <b>/<i>/<u> tags in between.
-function placeCaretAtTextOffset(el, offset) {
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
-    let remaining = offset;
-    let node = walker.nextNode();
-    while (node) {
-        if (remaining <= node.textContent.length) {
-            const range = document.createRange();
-            range.setStart(node, remaining);
-            range.collapse(true);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-            return;
-        }
-        remaining -= node.textContent.length;
-        node = walker.nextNode();
-    }
-    placeCaretAtEnd(el);
-}
-
-// Visible-character length of an HTML snippet, ignoring tags — used to find the exact join
-// point when merging two notes so the cursor can land there instead of at the very end.
-// Parsed inside a <template>: its content is inert, so nothing in the snippet can load or run.
-function plainTextLength(html) {
-    const tmpl = document.createElement('template');
-    tmpl.innerHTML = html;
-    return tmpl.content.textContent.length;
-}
-
-// Splits el's content at the current cursor position into "before"/"after" HTML strings, via
-// cloning rather than mutating the live element — extractContents() forces a synchronous reflow
-// on el right before the reconcile a moment later triggers another one, which is the "bump" felt
-// on Enter. Cloning into detached (never-attached) divs costs nothing layout-wise.
-function splitContentEditableAtCursor(el) {
-    const sel = window.getSelection();
-    if (!sel.rangeCount) return { before: el.innerHTML, after: '' };
-    const range = sel.getRangeAt(0);
-
-    const beforeRange = document.createRange();
-    beforeRange.selectNodeContents(el);
-    beforeRange.setEnd(range.endContainer, range.endOffset);
-    const beforeDiv = document.createElement('div');
-    beforeDiv.appendChild(beforeRange.cloneContents());
-
-    const afterRange = document.createRange();
-    afterRange.selectNodeContents(el);
-    afterRange.setStart(range.endContainer, range.endOffset);
-    const afterDiv = document.createElement('div');
-    afterDiv.appendChild(afterRange.cloneContents());
-
-    return { before: beforeDiv.innerHTML, after: afterDiv.innerHTML };
-}
-
-// Enter/Backspace/Arrow handling for Notes rows — kept separate from attachKeyboard since
-// contenteditable has no .value/.selectionStart and Notes alone has toggle children to manage.
-function attachNoteKeyboard(input, uid) {
-    let enterInFlight = false;
-
-    // Resolved at event time via input.dataset.id — a todo captured at attach time would go
-    // stale after the temp→real id swap or a later toggle conversion / reparent
-    const getSiblings = () => {
-        const self = currentTodos.find(t => t.id === input.dataset.id);
-        const parentKey = self ? (self.parentId || null) : null;
-        return currentTodos
-            .filter(t => t.page === currentPage && (t.parentId || null) === parentKey)
-            .sort((a, b) => a.sortOrder - b.sortOrder);
-    };
-
-    const onEnter = async (e) => {
-        e.preventDefault();
-        if (enterInFlight) return;
-        enterInFlight = true;
-
-        // Wrapped in try/finally so any unexpected error (e.g. todoId no longer present in
-        // currentTodos) can never leave enterInFlight stuck true — which would silently make
-        // Enter a no-op on this row forever after.
-        try {
-            const todoId = input.dataset.id;
-            const idx = currentTodos.findIndex(t => t.id === todoId);
-            if (idx === -1) return;
-            const current = currentTodos[idx];
-            const { before, after } = splitContentEditableAtCursor(input);
-            const siblings = getSiblings();
-            const sibIdx = siblings.findIndex(t => t.id === todoId);
-
-            if (before === '') {
-                // Cursor was at the very start: insert an empty sibling BEFORE this row instead of
-                // splitting its text off into a new row. Keeping current's id (and thus its children,
-                // if it's a toggle) in place is what stops a toggle's header + children from getting
-                // orphaned onto a brand new id when there's nothing to its left to begin with.
-                const prevSib = siblings[sibIdx - 1];
-                const currentOrder = current.sortOrder;
-                const prevOrder = prevSib ? prevSib.sortOrder : currentOrder - 2000;
-                const newSortOrder = (prevOrder + currentOrder) / 2;
-                const parentId = current.parentId || null;
-
-                const tempId = '_pending_' + Date.now();
-                currentTodos = [
-                    ...currentTodos.slice(0, idx),
-                    { id: tempId, text: '', isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId, isToggle: current.isToggle, collapsed: current.isToggle ? true : false },
-                    ...currentTodos.slice(idx),
-                ];
-                focusTarget = { id: todoId, cursor: 'start' };
-                renderApp(currentTodos);
-
-                try {
-                    updateSaveStatus('saving');
-                    const newDoc = await addTodo(uid, 0, '', newSortOrder, currentPage, parentId);
-                    updateSaveStatus('idle');
-                    if (current.isToggle) {
-                        await Promise.all([
-                            setIsToggle(uid, newDoc.id, true),
-                            setCollapsed(uid, newDoc.id, true),
-                        ]).catch(err => console.error(err));
-                    }
-                    currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-                    document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
-                } catch (err) {
-                    updateSaveStatus('error');
-                    showToast('Failed to create todo', 'error');
-                    currentTodos = currentTodos.filter(t => t.id !== tempId);
-                    renderApp(currentTodos);
-                    console.error(err);
-                }
-                return;
-            }
-
-            // Enter on an EXPANDED toggle's own header creates its first/next child. A collapsed
-            // toggle has no visible children to "add to", so it's treated as a normal sibling split
-            // instead — the new row inherits isToggle so splitting a toggle produces two toggles.
-            const isChildInsert = current.isToggle && !current.collapsed;
-            const newIsToggle = !isChildInsert && current.isToggle;
-            const insertSiblings = isChildInsert
-                ? currentTodos.filter(t => t.page === currentPage && t.parentId === current.id).sort((a, b) => a.sortOrder - b.sortOrder)
-                : siblings;
-            const insertSibIdx = insertSiblings.findIndex(t => t.id === todoId);
-            const nextSib = insertSiblings[insertSibIdx + 1];
-            const currentOrder = current.sortOrder;
-            const nextOrder = nextSib ? nextSib.sortOrder : currentOrder + 2000;
-            const newSortOrder = (currentOrder + nextOrder) / 2;
-            const parentId = isChildInsert ? current.id : (current.parentId || null);
-
-            currentTodos[idx] = { ...current, text: before };
-            dirtyIds.add(todoId);
-            // input still shows the pre-split content since splitContentEditableAtCursor no longer
-            // mutates it directly — write it in ourselves (the dirty flag above would otherwise make
-            // the reconcile below skip it, same as the merge case)
-            input.innerHTML = before;
-
-            const tempId = '_pending_' + Date.now();
-            currentTodos = [
-                ...currentTodos.slice(0, idx + 1),
-                { id: tempId, text: after, isDone: false, dateEpochDay: 0, sortOrder: newSortOrder, moveCount: 0, page: currentPage, parentId, isToggle: newIsToggle, collapsed: newIsToggle ? true : false },
-                ...currentTodos.slice(idx + 1),
-            ];
-            focusTarget = { id: tempId, cursor: 'start' };
-            renderApp(currentTodos);
-
-            try {
-                updateSaveStatus('saving');
-                const newDoc = await addTodo(uid, 0, after, newSortOrder, currentPage, parentId);
-                updateSaveStatus('idle');
-                if (newIsToggle) {
-                    await Promise.all([
-                        setIsToggle(uid, newDoc.id, true),
-                        setCollapsed(uid, newDoc.id, true),
-                    ]).catch(err => console.error(err));
-                }
-                currentTodos = currentTodos.map(t => t.id === tempId ? { ...t, id: newDoc.id } : t);
-                if (dirtyIds.has(tempId)) { dirtyIds.delete(tempId); dirtyIds.add(newDoc.id); }
-                document.querySelectorAll(`[data-id="${tempId}"]`).forEach(el => { el.dataset.id = newDoc.id; });
-            } catch (err) {
-                updateSaveStatus('error');
-                showToast('Failed to create todo', 'error');
-                currentTodos = currentTodos.filter(t => t.id !== tempId);
-                renderApp(currentTodos);
-                console.error(err);
-            }
-        } finally {
-            enterInFlight = false;
-        }
-    };
-
-    // beforeinput is the reliable way to catch Enter in contenteditable on Android (mirrors the
-    // keypress fallback attachKeyboard uses for the same reason on textareas)
-    input.addEventListener('beforeinput', (e) => {
-        if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') onEnter(e);
-    });
-    input.addEventListener('keydown', async (e) => {
-        if (e.key === 'Enter') { await onEnter(e); return; }
-
-        const todoId = input.dataset.id;
-
-        if (e.key === 'Backspace' && isCursorAtStart(input)) {
-            e.preventDefault();
-
-            // Backspace on an empty toggle's own header un-toggles it back to a plain empty row
-            // instead of deleting the line — same idea as a block editor's block "un-typing" on delete
-            const current = currentTodos.find(t => t.id === todoId);
-            if (current?.isToggle && input.textContent === '') {
-                const idx = currentTodos.findIndex(t => t.id === todoId);
-                currentTodos[idx] = { ...currentTodos[idx], isToggle: false, collapsed: false };
-                promoteChildren(uid, todoId);
-                focusTarget = { id: todoId, cursor: 'start' };
-                renderApp(currentTodos);
-                Promise.all([
-                    setIsToggle(uid, todoId, false),
-                    setCollapsed(uid, todoId, false),
-                ]).catch(err => console.error(err));
-                return;
-            }
-
-            const siblings = getSiblings();
-            const sibIdx = siblings.findIndex(t => t.id === todoId);
-            const prev = siblings[sibIdx - 1];
-
-            if (!prev && input.textContent === '') {
-                promoteChildren(uid, todoId);
-                currentTodos = currentTodos.filter(t => t.id !== todoId);
-                dirtyIds.delete(todoId);
-                renderApp(currentTodos);
-                deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
-                return;
-            }
-            if (!prev) return;
-
-            if (input.textContent === '') {
-                focusTarget = { id: prev.id, cursor: 'end' };
-                promoteChildren(uid, todoId);
-                currentTodos = currentTodos.filter(t => t.id !== todoId);
-                dirtyIds.delete(todoId);
-                renderApp(currentTodos);
-                deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
-            } else {
-                const prevIdx = currentTodos.findIndex(t => t.id === prev.id);
-                const splitOffset = plainTextLength(prev.text);
-                const mergedText = prev.text + input.innerHTML;
-                currentTodos[prevIdx] = { ...currentTodos[prevIdx], text: mergedText };
-                dirtyIds.add(prev.id);
-                // Write the merge straight into prev's DOM node — the dirty flag we just set
-                // would otherwise make the reconcile below skip refreshing its (already-rendered) content
-                const prevEl = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
-                if (prevEl) prevEl.innerHTML = sanitizeNoteHtml(mergedText);
-                promoteChildren(uid, todoId);
-                currentTodos = currentTodos.filter(t => t.id !== todoId);
-                dirtyIds.delete(todoId);
-                // Land the cursor at the join point (where the deleted line used to start),
-                // not at the very end of the merged text
-                focusTarget = { id: prev.id, cursor: splitOffset };
-                renderApp(currentTodos);
-                deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
-            }
-            return;
-        }
-
-        if (e.key === 'ArrowUp' && isCursorAtStart(input)) {
-            e.preventDefault();
-            const siblings = getSiblings();
-            const prev = siblings[siblings.findIndex(t => t.id === todoId) - 1];
-            if (prev) {
-                const el = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
-                if (el) { el.focus(); placeCaretAtEnd(el); }
-            }
-        }
-
-        if (e.key === 'ArrowDown' && isCursorAtEnd(input)) {
-            e.preventDefault();
-            const siblings = getSiblings();
-            const next = siblings[siblings.findIndex(t => t.id === todoId) + 1];
-            if (next) {
-                const el = document.querySelector(`.todo-input[data-id="${next.id}"]`);
-                if (el) { el.focus(); placeCaretAtStart(el); }
-            }
-        }
-    });
-}
-
-function isMobileViewport() {
-    return window.matchMedia('(max-width: 768px)').matches;
-}
-
-// --- Selection format toolbar (Notes: bold / italic / underline / color, desktop only — see initMobileNotesBar) ---
-
-// value: null means "default" (reset to the theme's normal text color)
-const NOTE_COLORS = [
-    { name: 'default', value: null },
-    { name: 'gray', value: '#9B9A97' },
-    { name: 'orange', value: '#D9730D' },
-    { name: 'yellow', value: '#CB912F' },
-    { name: 'green', value: '#448361' },
-    { name: 'blue', value: '#337EA9' },
-    { name: 'purple', value: '#9065B0' },
-    { name: 'red', value: '#D44C47' },
-];
-
-function applyTextColor(color) {
-    // Read from body, not documentElement — [data-theme] is set on <body>, so that's where the
-    // live (theme-correct) value of --text actually resolves
-    const value = color || getComputedStyle(document.body).getPropertyValue('--text').trim();
-    const active = document.activeElement;
-    document.execCommand('foreColor', false, value);
-    active?.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-// All format-toolbar/color-swatch buttons preventDefault on mousedown — that's the event whose
-// default action collapses the text selection, so keeping it alive is what lets execCommand act on it
-function formatBarButton(label, className, onClick) {
-    const btn = document.createElement('div');
-    btn.className = className;
-    btn.textContent = label;
-    btn.addEventListener('mousedown', (e) => e.preventDefault());
-    btn.addEventListener('click', onClick);
-    return btn;
-}
-
-let formatToolbarEl = null;
-let formatToolbarRect = null;
-
-function hideFormatToolbar() {
-    if (formatToolbarEl) { formatToolbarEl.remove(); formatToolbarEl = null; }
-    formatToolbarRect = null;
-}
-
-function positionFormatToolbar(bar, rect) {
-    const top = rect.top - bar.offsetHeight - 8;
-    const left = rect.left + rect.width / 2 - bar.offsetWidth / 2;
-    bar.style.top = `${Math.max(4, top)}px`;
-    bar.style.left = `${Math.max(4, left)}px`;
-}
-
-function renderFormatToolbarMain(bar) {
-    bar.innerHTML = '';
-    [['bold', 'B'], ['italic', 'I'], ['underline', 'U']].forEach(([cmd, label]) => {
-        bar.appendChild(formatBarButton(label, `format-btn format-${cmd}`, () => {
-            const active = document.activeElement;
-            document.execCommand(cmd);
-            active?.dispatchEvent(new Event('input', { bubbles: true }));
-        }));
-    });
-    bar.appendChild(formatBarButton('A', 'format-btn format-color-trigger', () => renderFormatToolbarColors(bar)));
-    positionFormatToolbar(bar, formatToolbarRect);
-}
-
-function renderFormatToolbarColors(bar) {
-    bar.innerHTML = '';
-    bar.appendChild(formatBarButton('‹', 'format-btn', () => renderFormatToolbarMain(bar)));
-    NOTE_COLORS.forEach(({ name, value }) => {
-        const swatch = document.createElement('div');
-        swatch.className = `format-color-swatch${value ? '' : ' is-default'}`;
-        swatch.style.background = value || 'var(--text)';
-        swatch.title = name;
-        swatch.addEventListener('mousedown', (e) => e.preventDefault());
-        swatch.addEventListener('click', () => { applyTextColor(value); hideFormatToolbar(); });
-        bar.appendChild(swatch);
-    });
-    positionFormatToolbar(bar, formatToolbarRect);
-}
-
-function showFormatToolbar(rect) {
-    hideFormatToolbar();
-    const bar = document.createElement('div');
-    bar.className = 'format-toolbar';
-    document.body.appendChild(bar);
-    formatToolbarRect = rect;
-    renderFormatToolbarMain(bar);
-    formatToolbarEl = bar;
-}
-
-document.addEventListener('selectionchange', () => {
-    // Mobile shows bold/italic/underline in the docked bar above the keyboard instead (see initMobileNotesBar)
-    if (isMobileViewport()) { hideFormatToolbar(); return; }
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideFormatToolbar(); return; }
-    const anchor = sel.anchorNode;
-    const anchorEl = anchor && (anchor.nodeType === 1 ? anchor : anchor.parentElement);
-    const el = anchorEl?.closest?.('.todo-input[contenteditable="true"]');
-    if (!el) { hideFormatToolbar(); return; }
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) { hideFormatToolbar(); return; }
-    showFormatToolbar(rect);
-});
-
 // --- Core reconciliation ---
 
 // Reuses existing DOM rows by key (data-id), moves them into correct order, removes stale ones.
 // Existing rows are updated in place — the focused input is never destroyed.
-function reconcileRows(list, todos, anchor, existingById, createRow, updateRow) {
-    todos.forEach(todo => {
+function reconcileRows(list, rowTodos, anchor, existingById, createRow, updateRow) {
+    rowTodos.forEach(todo => {
         let row = existingById.get(todo.id);
         if (row) {
             updateRow(row, todo);
@@ -1159,16 +455,16 @@ function reconcileRows(list, todos, anchor, existingById, createRow, updateRow) 
 
 // --- Main entry point ---
 
-export function renderApp(todos) {
+export function renderApp(renderTodos) {
     const uid = auth.currentUser?.uid;
     if (!uid || isAnimating) return;
 
     const container = document.getElementById('app-content');
 
     if (currentPage === 'todo') {
-        reconcileCalendarView(container, todos, uid);
+        reconcileCalendarView(container, renderTodos, uid);
     } else {
-        reconcileFlatView(container, todos, uid);
+        reconcileFlatView(container, renderTodos, uid);
     }
 
     // Restore focus after Enter (new todo) or Backspace (merge) operations
@@ -1184,13 +480,15 @@ export function renderApp(todos) {
                 el.setSelectionRange(focusTarget.cursor, focusTarget.cursor);
             }
         }
-        focusTarget = null;
+        setFocusTarget(null);
     }
 }
 
+setRenderer(renderApp);
+
 // --- Calendar view ---
 
-function reconcileCalendarView(container, todos, uid) {
+function reconcileCalendarView(container, renderTodos, uid) {
     container.querySelectorAll('.flat-list').forEach(el => el.remove());
 
     const today = getTodayEpoch();
@@ -1209,7 +507,7 @@ function reconcileCalendarView(container, todos, uid) {
     });
 
     epochs.forEach(epoch => {
-        const dayTodos = todos.filter(t => t.dateEpochDay === epoch && (!t.page || t.page === 'todo'));
+        const dayTodos = renderTodos.filter(t => t.dateEpochDay === epoch && (!t.page || t.page === 'todo'));
         const existing = existingSections.get(epoch);
 
         if (existing) {
@@ -1230,14 +528,14 @@ function reconcileCalendarView(container, todos, uid) {
         const todaySection = container.querySelector(`.day-section[data-epoch="${today}"]`);
         if (todaySection) {
             const inputs = [...todaySection.querySelectorAll('.todo-input')].filter(el => el.value.trim() !== '');
-            // neue Todos zuerst animieren, dann farbige (moveCount >= 1)
+            // Animate new todos first, then the carried-over (colored) ones
             inputs.sort((a, b) => {
-                const aMoved = (currentTodos.find(t => t.id === a.dataset.id)?.moveCount || 0) >= 1 ? 1 : 0;
-                const bMoved = (currentTodos.find(t => t.id === b.dataset.id)?.moveCount || 0) >= 1 ? 1 : 0;
+                const aMoved = (todos.find(t => t.id === a.dataset.id)?.moveCount || 0) >= 1 ? 1 : 0;
+                const bMoved = (todos.find(t => t.id === b.dataset.id)?.moveCount || 0) >= 1 ? 1 : 0;
                 return aMoved - bMoved;
             });
             inputs.forEach(el => { el.dataset.fullText = el.value; el.value = ''; });
-            typeInputs(inputs).then(() => renderApp(currentTodos));
+            typeInputs(inputs).then(() => renderApp(todos));
         }
     }
 }
@@ -1313,7 +611,7 @@ function buildDayHeader(dateEpoch, today) {
     `;
     header.addEventListener('click', () => {
         expandedStates[dateEpoch] = !expandedStates[dateEpoch];
-        renderApp(currentTodos);
+        renderApp(todos);
     });
     return header;
 }
@@ -1326,14 +624,13 @@ function buildAddBtn(isEmpty, emptyText, onClick) {
     return btn;
 }
 
-// --- Flat view ---
+// --- Flat view (soon/longRun/keepInMind) ---
 
-// Maps todo id → nesting depth for the current render pass, populated by flattenForDisplay().
-// Only keepInMind actually nests; other flat pages get depth 0 for every row.
-let flatDepthMap = new Map();
-
+// Builds the display order. Only keepInMind actually nests: depth-first walk,
+// collapsed toggles' children are skipped entirely (not just hidden), and
+// flatDepthMap gets the indentation depth per id.
 function flattenForDisplay(pageTodos) {
-    flatDepthMap = new Map();
+    flatDepthMap.clear();
 
     if (currentPage !== 'keepInMind') {
         const sorted = [...pageTodos].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -1361,10 +658,10 @@ function flattenForDisplay(pageTodos) {
     return result;
 }
 
-function reconcileFlatView(container, todos, uid) {
+function reconcileFlatView(container, renderTodos, uid) {
     container.querySelectorAll('.day-section').forEach(s => s.remove());
 
-    const pageTodos = todos.filter(t => t.page === currentPage);
+    const pageTodos = renderTodos.filter(t => t.page === currentPage);
     const displayTodos = flattenForDisplay(pageTodos);
 
     let list = container.querySelector('.todo-list.flat-list');
@@ -1392,402 +689,3 @@ function reconcileFlatView(container, todos, uid) {
         (row, todo) => isNotes ? updateNoteRow(row, todo, uid) : updateFlatRow(row, todo)
     );
 }
-
-// --- Row menu (Notes: "+" button) ---
-
-let openMenuEl = null;
-
-function closeRowMenu() {
-    if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
-}
-
-function openRowMenu(e, todo, uid) {
-    e.stopPropagation();
-    closeRowMenu();
-
-    const menu = document.createElement('div');
-    menu.className = 'row-menu';
-
-    const toggleOpt = document.createElement('div');
-    toggleOpt.className = 'row-menu-item';
-    toggleOpt.textContent = t('toggle_list');
-    toggleOpt.addEventListener('click', () => {
-        convertRowToToggle(todo, uid);
-        closeRowMenu();
-    });
-    menu.appendChild(toggleOpt);
-
-    // Append (invisible until positioned) so we can measure it — needed to flip the
-    // menu upward when it's triggered from the bottom-docked mobile bar.
-    document.body.appendChild(menu);
-    const rect = e.currentTarget.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const top = spaceBelow >= menu.offsetHeight + 8 ? rect.bottom + 4 : rect.top - menu.offsetHeight - 4;
-    menu.style.left = `${rect.left}px`;
-    menu.style.top = `${Math.max(4, top)}px`;
-
-    openMenuEl = menu;
-}
-
-function convertRowToToggle(todo, uid) {
-    const idx = currentTodos.findIndex(t => t.id === todo.id);
-    if (idx === -1) return;
-    currentTodos[idx] = { ...currentTodos[idx], isToggle: true, collapsed: true };
-    renderApp(currentTodos);
-    // Same snap-back guard as drag & drop: clicking "+" blurs the input, whose save can produce
-    // a snapshot that still has isToggle=false — keep it from reverting the optimistic caret
-    dirtyIds.add(todo.id);
-    Promise.all([
-        setIsToggle(uid, todo.id, true),
-        setCollapsed(uid, todo.id, true),
-    ])
-        .then(() => dirtyIds.delete(todo.id))
-        .catch(e => { dirtyIds.delete(todo.id); showToast('Failed to convert', 'error'); console.error(e); });
-}
-
-document.addEventListener('pointerdown', (e) => {
-    if (openMenuEl && !openMenuEl.contains(e.target) && !e.target.closest('.row-plus-btn')) closeRowMenu();
-});
-
-// --- Drag and Drop ---
-
-function initDragAndDrop() {
-    const container = document.getElementById('app-content');
-    if (!container) return;
-
-    let draggedRow = null;
-    let placeholder = null;
-    let startY = 0;
-    let currentY = 0;
-    let lastClientY = 0;
-    let dragTimeout = null;
-    let siblings = [];
-    let draggedHeight = 0;
-    let dragStartIndex = -1;
-    let isDragging = false;
-
-    container.addEventListener('pointerdown', (e) => {
-        if (e.button !== 0) return;
-        if (currentPage === 'keepInMind') return; // Notes: no drag & drop
-
-        const isTouch = e.pointerType === 'touch';
-        const handle = e.target.closest('.drag-handle');
-        const row = e.target.closest('.todo-row');
-
-        if (!row) return;
-        if (!isTouch && !handle) return;
-
-        draggedRow = row;
-        startY = e.clientY;
-
-        const startDrag = () => {
-            isDragging = true;
-            if (navigator.vibrate) navigator.vibrate(50);
-
-            placeholder = document.createElement('div');
-            placeholder.className = 'drag-placeholder';
-            draggedHeight = draggedRow.offsetHeight;
-            placeholder.style.height = `${draggedHeight}px`;
-
-            const list = draggedRow.parentElement;
-            siblings = Array.from(list.querySelectorAll('.todo-row'));
-            dragStartIndex = siblings.indexOf(draggedRow);
-
-            draggedRow.classList.add('is-dragging');
-            draggedRow.style.width = `${draggedRow.offsetWidth}px`;
-
-            const rect = draggedRow.getBoundingClientRect();
-            draggedRow.parentElement.insertBefore(placeholder, draggedRow);
-            draggedRow.style.position = 'fixed';
-            draggedRow.style.top = `${rect.top}px`;
-            draggedRow.style.left = `${rect.left}px`;
-            draggedRow.style.zIndex = '1000';
-            
-            container.setPointerCapture(e.pointerId);
-        };
-
-        if (isTouch && !handle) {
-            dragTimeout = setTimeout(startDrag, 300);
-        } else {
-            startDrag();
-        }
-    });
-
-    container.addEventListener('pointermove', (e) => {
-        if (!draggedRow) return;
-
-        if (!isDragging) {
-            if (Math.abs(e.clientY - startY) > 10) {
-                clearTimeout(dragTimeout);
-                draggedRow = null;
-            }
-            return;
-        }
-
-        e.preventDefault();
-
-        currentY = e.clientY - startY;
-        draggedRow.style.transform = `translateY(${currentY}px)`;
-
-        for (let i = 0; i < siblings.length; i++) {
-            if (i === dragStartIndex) continue;
-            const sib = siblings[i];
-            const rect = sib.getBoundingClientRect();
-            const mid = rect.top + rect.height / 2;
-
-            if (e.clientY < mid) {
-                if (i < dragStartIndex) sib.style.transform = `translateY(${draggedHeight}px)`;
-                else sib.style.transform = '';
-            } else {
-                if (i > dragStartIndex) sib.style.transform = `translateY(-${draggedHeight}px)`;
-                else sib.style.transform = '';
-            }
-        }
-    });
-
-    const endDrag = (e) => {
-        clearTimeout(dragTimeout);
-        if (!isDragging) {
-            draggedRow = null;
-            return;
-        }
-
-        try { container.releasePointerCapture(e.pointerId); } catch(err){}
-        isDragging = false;
-
-        const before = [
-            ...siblings.slice(0, dragStartIndex).filter(s => !s.style.transform),
-            ...siblings.slice(dragStartIndex + 1).filter(s => s.style.transform),
-        ];
-        const after = [
-            ...siblings.slice(0, dragStartIndex).filter(s => s.style.transform),
-            ...siblings.slice(dragStartIndex + 1).filter(s => !s.style.transform),
-        ];
-        const newIndex = before.length;
-
-        placeholder.remove();
-        draggedRow.classList.remove('is-dragging');
-        draggedRow.style = '';
-        siblings.forEach(s => s.style.transform = '');
-
-        if (newIndex !== dragStartIndex) {
-            const prevId = before.length > 0 ? before[before.length - 1].dataset.id : null;
-            const nextId = after.length > 0 ? after[0].dataset.id : null;
-            handleDrop(draggedRow.dataset.id, prevId, nextId);
-        }
-
-        draggedRow = null;
-    };
-
-    container.addEventListener('pointerup', endDrag);
-    container.addEventListener('pointercancel', endDrag);
-
-    container.addEventListener('touchmove', (e) => {
-        if (!isDragging || !draggedRow) return;
-        e.preventDefault();
-
-        lastClientY = e.touches[0].clientY;
-        currentY = lastClientY - startY;
-        draggedRow.style.transform = `translateY(${currentY}px)`;
-
-        for (let i = 0; i < siblings.length; i++) {
-            if (i === dragStartIndex) continue;
-            const sib = siblings[i];
-            const rect = sib.getBoundingClientRect();
-            const mid = rect.top + rect.height / 2;
-            if (lastClientY < mid) {
-                if (i < dragStartIndex) sib.style.transform = `translateY(${draggedHeight}px)`;
-                else sib.style.transform = '';
-            } else {
-                if (i > dragStartIndex) sib.style.transform = `translateY(-${draggedHeight}px)`;
-                else sib.style.transform = '';
-            }
-        }
-    }, { passive: false });
-
-    container.addEventListener('touchend', () => {
-        if (isDragging) endDrag({ pointerId: null });
-    });
-}
-
-function handleDrop(draggedId, prevId, nextId) {
-    const prev = currentTodos.find(t => t.id === prevId);
-    const next = currentTodos.find(t => t.id === nextId);
-
-    let newSortOrder;
-    if (prev && next) {
-        newSortOrder = (prev.sortOrder + next.sortOrder) / 2;
-    } else if (prev) {
-        newSortOrder = prev.sortOrder + 2000;
-    } else if (next) {
-        newSortOrder = next.sortOrder - 2000;
-    } else {
-        newSortOrder = Date.now();
-    }
-
-    const idx = currentTodos.findIndex(t => t.id === draggedId);
-    if (idx !== -1) {
-        currentTodos[idx] = { ...currentTodos[idx], sortOrder: newSortOrder };
-        currentTodos.sort((a, b) => a.sortOrder - b.sortOrder);
-        renderApp(currentTodos);
-
-        const uid = auth.currentUser?.uid;
-        if (uid) {
-            // Protect against scheduleRender overwriting the optimistic order with a
-            // stale snapshot that arrives before this write has propagated (snap-back)
-            dirtyIds.add(draggedId);
-            updateSaveStatus('saving');
-            updateSortOrder(uid, draggedId, newSortOrder)
-                .then(() => {
-                    dirtyIds.delete(draggedId);
-                    updateSaveStatus('idle');
-                })
-                .catch(e => {
-                    dirtyIds.delete(draggedId);
-                    showToast('Failed to save order', 'error');
-                    console.error(e);
-                    updateSaveStatus('error');
-                });
-        }
-    }
-}
-
-initDragAndDrop();
-
-// --- Mobile Notes compose bar ---
-// No mouse on mobile, so the per-row "+" (hover-only on desktop) doesn't work there, and there's
-// nowhere for a floating selection toolbar to sensibly appear above the keyboard either. Instead,
-// dock a single bar above the keyboard while a Notes input is focused — best effort via
-// VisualViewport, since fixed-position elements don't naturally follow the keyboard on iOS. It
-// shows "+" normally, and swaps to bold/italic/underline while text is selected.
-function initMobileNotesBar() {
-    let bar = null;
-    let focusedNoteId = null;
-
-    // Prefer the live focused input's id — focusedNoteId can hold a temp id that was
-    // swapped for the real one while the input stayed focused
-    function focusedTodo() {
-        const active = document.activeElement;
-        const id = active?.classList?.contains('todo-input') ? active.dataset.id : focusedNoteId;
-        return currentTodos.find(t => t.id === id);
-    }
-
-    // All bar buttons preventDefault on mousedown: keeps the input focused (and the
-    // keyboard open) through the tap, and any text selection alive for execCommand
-    function barButton(label, className, onClick) {
-        const btn = document.createElement('div');
-        btn.className = className;
-        btn.textContent = label;
-        btn.addEventListener('mousedown', (e) => e.preventDefault());
-        btn.addEventListener('click', onClick);
-        return btn;
-    }
-
-    function buildPlusButtons() {
-        return [barButton('+', 'mobile-notes-bar-btn', () => setMode('menu'))];
-    }
-
-    // The bar itself becomes the menu (Notion-style) — no popup above it
-    function buildMenuButtons() {
-        return [
-            barButton('×', 'mobile-notes-bar-btn', () => setMode('plus')),
-            barButton(t('toggle_list'), 'mobile-notes-bar-btn mobile-notes-bar-option', () => {
-                const todo = focusedTodo();
-                const uid = auth.currentUser?.uid;
-                if (todo && uid) convertRowToToggle(todo, uid);
-                setMode('plus');
-            }),
-        ];
-    }
-
-    function buildFormatButtons() {
-        const buttons = [['bold', 'B'], ['italic', 'I'], ['underline', 'U']].map(([cmd, label]) =>
-            barButton(label, `mobile-notes-bar-btn format-${cmd}`, () => {
-                const active = document.activeElement;
-                document.execCommand(cmd);
-                active?.dispatchEvent(new Event('input', { bubbles: true }));
-            })
-        );
-        buttons.push(barButton('A', 'mobile-notes-bar-btn format-color-trigger', () => setMode('color')));
-        return buttons;
-    }
-
-    function buildColorButtons() {
-        const buttons = [barButton('‹', 'mobile-notes-bar-btn', () => setMode('format'))];
-        NOTE_COLORS.forEach(({ name, value }) => {
-            const swatch = document.createElement('div');
-            swatch.className = `mobile-notes-bar-btn mobile-color-swatch${value ? '' : ' is-default'}`;
-            swatch.style.background = value || 'var(--text)';
-            swatch.title = name;
-            swatch.addEventListener('mousedown', (e) => e.preventDefault());
-            swatch.addEventListener('click', () => { applyTextColor(value); setMode('format'); });
-            buttons.push(swatch);
-        });
-        return buttons;
-    }
-
-    const MODE_BUILDERS = { plus: buildPlusButtons, menu: buildMenuButtons, format: buildFormatButtons, color: buildColorButtons };
-
-    function setMode(mode) {
-        if (!bar || bar.dataset.mode === mode) return;
-        bar.dataset.mode = mode;
-        bar.innerHTML = '';
-        MODE_BUILDERS[mode]().forEach(el => bar.appendChild(el));
-    }
-
-    function ensureBar() {
-        if (bar) return bar;
-        bar = document.createElement('div');
-        bar.className = 'mobile-notes-bar';
-        document.body.appendChild(bar);
-        setMode('plus');
-        return bar;
-    }
-
-    function reposition() {
-        if (!bar || !bar.classList.contains('visible') || !window.visualViewport) return;
-        const vv = window.visualViewport;
-        const offsetFromBottom = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
-        bar.style.bottom = `${offsetFromBottom}px`;
-    }
-
-    document.addEventListener('focusin', (e) => {
-        if (!isMobileViewport() || currentPage !== 'keepInMind' || !e.target.classList.contains('todo-input')) return;
-        focusedNoteId = e.target.dataset.id;
-        ensureBar().classList.add('visible');
-        setMode('plus');
-        reposition();
-    });
-
-    document.addEventListener('focusout', (e) => {
-        if (!e.target.classList.contains('todo-input')) return;
-        setTimeout(() => {
-            if (!document.activeElement?.classList.contains('todo-input')) {
-                bar?.classList.remove('visible');
-                focusedNoteId = null;
-            }
-        }, 50);
-    });
-
-    document.addEventListener('selectionchange', () => {
-        if (!bar || !bar.classList.contains('visible') || !isMobileViewport()) return;
-        const sel = window.getSelection();
-        const hasSelection = !!sel && !sel.isCollapsed && sel.rangeCount > 0;
-        // Don't stomp an open color picker back to the plain format row
-        if (hasSelection) { if (bar.dataset.mode !== 'color') setMode('format'); }
-        // Only demote from format — a collapsed selection must not close an open menu
-        else if (bar.dataset.mode === 'format') setMode('plus');
-    });
-
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', reposition);
-        window.visualViewport.addEventListener('scroll', reposition);
-    }
-}
-
-initMobileNotesBar();
-
-// Cancel typing animation on any user interaction so the UI stays fully responsive
-document.addEventListener('pointerdown', () => {
-    if (isAnimating) cancelTypingAnimation();
-}, { capture: true });
