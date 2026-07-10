@@ -21,11 +21,13 @@ export function applyAccent() {
     document.body.style.setProperty('--accent', `hsl(${hue}, 80%, 60%)`);
 }
 
-// Grain is generated noise, not a solid ink color: the dark-mode version shows light
-// speckles on the dark bg, so light mode needs a black-speckle version (feColorMatrix
-// zeroes RGB, keeps the turbulence alpha) to be visible on white.
-const _noiseSvgDark  = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/></filter><rect width='200' height='200' filter='url(#n)'/></svg>`;
-const _noiseSvgLight = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/><feColorMatrix type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0'/></filter><rect width='200' height='200' filter='url(#n)'/></svg>`;
+// Grain is generated noise, not a solid ink color. feColorMatrix forces the speckles
+// to one color (white on dark, black on light) and keeps the turbulence's own alpha as
+// the noise, so it reads as clean grain on either background rather than faint colour
+// noise. The last matrix row biases alpha up (×1.6) so the specks aren't washed out.
+const _grainSvg = (r, g, b) => `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' stitchTiles='stitch'/><feColorMatrix type='matrix' values='0 0 0 0 ${r} 0 0 0 0 ${g} 0 0 0 0 ${b} 0 0 0 1.6 0'/></filter><rect width='200' height='200' filter='url(#n)'/></svg>`;
+const _noiseSvgDark  = _grainSvg(1, 1, 1);
+const _noiseSvgLight = _grainSvg(0, 0, 0);
 // Pattern ink follows the theme — white lines are invisible on the light theme's
 // white background, so light mode draws with black instead
 function getPatterns(isLight) {
@@ -57,9 +59,12 @@ export function applyPattern() {
         return;
     }
     const isLight = (localStorage.getItem(THEME_KEY) || 'dark') === 'light';
-    // Map 0–100 → 0.01–0.08 — kept deliberately subtle, anything stronger distracts
+    // Geometric patterns map 0–100 → 0.01–0.08 (deliberately subtle). Grain is diffuse
+    // noise and needs a much higher ceiling to register at all, so it gets its own range.
     const value = parseInt(localStorage.getItem(BG_PATTERN_OPACITY_KEY) ?? '30');
-    const opacity = 0.01 + (value / 100) * 0.07;
+    const opacity = pattern === 'grain'
+        ? 0.06 + (value / 100) * 0.24   // 0.06 – 0.30
+        : 0.01 + (value / 100) * 0.07;  // 0.01 – 0.08
     overlay.style.backgroundImage = getPatterns(isLight)[pattern];
     overlay.style.backgroundSize = PATTERN_SIZES[pattern] || 'auto';
     overlay.style.opacity = opacity.toFixed(3);
