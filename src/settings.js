@@ -19,14 +19,19 @@ export function applyAccent() {
 }
 
 const _noiseSvg = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/></filter><rect width='200' height='200' filter='url(#n)'/></svg>`;
-const PATTERNS = {
-    none: null,
-    grain: `url("data:image/svg+xml,${encodeURIComponent(_noiseSvg)}")`,
-    dots: `radial-gradient(circle, rgba(255,255,255,0.7) 1px, transparent 1px)`,
-    grid: `linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)`,
-    diagonal: `repeating-linear-gradient(45deg, transparent 0px, transparent 18px, rgba(255,255,255,0.6) 18px, rgba(255,255,255,0.6) 19px)`,
-    scan: `repeating-linear-gradient(0deg, transparent 0px, transparent 3px, rgba(255,255,255,0.4) 3px, rgba(255,255,255,0.4) 4px)`,
-};
+// Pattern ink follows the theme — white lines are invisible on the light theme's
+// white background, so light mode draws with black instead
+function getPatterns(isLight) {
+    const ink = isLight ? '0,0,0' : '255,255,255';
+    return {
+        none: null,
+        grain: `url("data:image/svg+xml,${encodeURIComponent(_noiseSvg)}")`,
+        dots: `radial-gradient(circle, rgba(${ink},0.7) 1px, transparent 1px)`,
+        grid: `linear-gradient(rgba(${ink},0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(${ink},0.5) 1px, transparent 1px)`,
+        diagonal: `repeating-linear-gradient(45deg, transparent 0px, transparent 18px, rgba(${ink},0.6) 18px, rgba(${ink},0.6) 19px)`,
+        scan: `repeating-linear-gradient(0deg, transparent 0px, transparent 3px, rgba(${ink},0.4) 3px, rgba(${ink},0.4) 4px)`,
+    };
+}
 const PATTERN_SIZES = {
     grain: '200px 200px',
     dots: '20px 20px',
@@ -43,32 +48,37 @@ export function applyPattern() {
         overlay.style.opacity = '0';
         return;
     }
+    const isLight = (localStorage.getItem(THEME_KEY) || 'dark') === 'light';
     // Map 0–100 → 0.01–0.08 — kept deliberately subtle, anything stronger distracts
     const value = parseInt(localStorage.getItem(BG_PATTERN_OPACITY_KEY) ?? '30');
     const opacity = 0.01 + (value / 100) * 0.07;
-    overlay.style.backgroundImage = PATTERNS[pattern];
+    overlay.style.backgroundImage = getPatterns(isLight)[pattern];
     overlay.style.backgroundSize = PATTERN_SIZES[pattern] || 'auto';
     overlay.style.opacity = opacity.toFixed(3);
 }
 
 export function applyBgBrightness() {
     const theme = localStorage.getItem(THEME_KEY) || 'dark';
-    if (theme === 'light') {
-        document.documentElement.style.removeProperty('--bg');
-        document.documentElement.style.removeProperty('--input-bg');
-        document.documentElement.style.removeProperty('--modal-bg');
-        return;
-    }
     const value = parseInt(localStorage.getItem(BG_BRIGHTNESS_KEY) ?? '0');
-    // 0 → #121212 (18), 100 → #666666 (102)
-    const bg = Math.round(18 + (value / 100) * 84);
-    const surface = Math.round(30 + (value / 100) * 72); // #1e1e1e (30) → #666 (102)
-    const hex = v => v.toString(16).padStart(2, '0');
-    const bgHex = `#${hex(bg)}${hex(bg)}${hex(bg)}`;
-    const surfaceHex = `#${hex(surface)}${hex(surface)}${hex(surface)}`;
-    document.documentElement.style.setProperty('--bg', bgHex);
-    document.documentElement.style.setProperty('--input-bg', surfaceHex);
-    document.documentElement.style.setProperty('--modal-bg', surfaceHex);
+    const hex = v => `#${v.toString(16).padStart(2, '0').repeat(3)}`;
+
+    let bg, surface, modal;
+    if (theme === 'light') {
+        // 0 → #ffffff (255) down to "dirty white" #c8c8c8 (200); inputs track the
+        // theme default #f5f5f5 (245) with the same travel. At 0 everything matches
+        // the plain light theme exactly (modals are white there, not surface-toned).
+        bg = Math.round(255 - (value / 100) * 55);
+        surface = Math.round(245 - (value / 100) * 55);
+        modal = bg;
+    } else {
+        // 0 → #121212 (18), 100 → #666666 (102); surfaces #1e1e1e (30) → #666 (102)
+        bg = Math.round(18 + (value / 100) * 84);
+        surface = Math.round(30 + (value / 100) * 72);
+        modal = surface;
+    }
+    document.documentElement.style.setProperty('--bg', hex(bg));
+    document.documentElement.style.setProperty('--input-bg', hex(surface));
+    document.documentElement.style.setProperty('--modal-bg', hex(modal));
 }
 
 function getBannerPos() {
@@ -151,6 +161,8 @@ function setTheme(theme) {
     localStorage.setItem(THEME_KEY, theme);
     document.body.setAttribute('data-theme', theme);
     applyBgBrightness();
+    // The pattern ink is theme-dependent (white on dark, black on light)
+    applyPattern();
 }
 
 // --- Settings Modal ---
