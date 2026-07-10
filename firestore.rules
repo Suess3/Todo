@@ -1,11 +1,52 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{uid}/todos/{todoId} {
-      allow read, write: if request.auth.uid == uid;
+
+    // A todo may only contain the fields the app writes, with the right types.
+    // request.resource.data is the post-write document, so this also validates
+    // partial updates. Fields introduced later (parentId, isToggle, ...) are
+    // optional because older documents predate them.
+    function isValidTodo(d) {
+      return d.keys().hasOnly([
+          'text', 'isDone', 'dateEpochDay', 'sortOrder', 'moveCount',
+          'page', 'parentId', 'isToggle', 'collapsed', 'createdAt', 'completedAt'
+        ])
+        && d.text is string && d.text.size() <= 10000
+        && d.isDone is bool
+        && d.dateEpochDay is number
+        && d.sortOrder is number
+        && (!('moveCount' in d) || d.moveCount is number)
+        && (!('page' in d) || d.page in ['todo', 'keepInMind', 'soon', 'longRun'])
+        && (!('parentId' in d) || d.parentId == null || d.parentId is string)
+        && (!('isToggle' in d) || d.isToggle is bool)
+        && (!('collapsed' in d) || d.collapsed is bool)
+        && (!('createdAt' in d) || d.createdAt is number)
+        && (!('completedAt' in d) || d.completedAt == null || d.completedAt is number);
     }
+
+    // Productivity docs are keyed YYYY-MM-DD and hold counters bucketed by
+    // moveCount: { "0": n, ..., "5": n }.
+    function isValidProductivity(d) {
+      return d.keys().hasOnly(['0', '1', '2', '3', '4', '5'])
+        && (!('0' in d) || d['0'] is number)
+        && (!('1' in d) || d['1'] is number)
+        && (!('2' in d) || d['2'] is number)
+        && (!('3' in d) || d['3'] is number)
+        && (!('4' in d) || d['4'] is number)
+        && (!('5' in d) || d['5'] is number);
+    }
+
+    match /users/{uid}/todos/{todoId} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && isValidTodo(request.resource.data);
+    }
+
     match /users/{uid}/productivity/{dayId} {
-      allow read, write: if request.auth.uid == uid;
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && dayId.matches('\\d{4}-\\d{2}-\\d{2}')
+        && isValidProductivity(request.resource.data);
     }
   }
 }
