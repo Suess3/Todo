@@ -24,3 +24,7 @@ export const flatDepthMap = new Map();
 // this hook instead of importing render.js, which would be circular.
 export let rerender = () => {};
 export function setRenderer(fn) { rerender = fn; }
+
+// Ids of rows marked by a cross-row drag (selection.js). Kept here so the
+// renderer can re-apply the highlight after every reconcile.
+export const selectedIds = new Set();

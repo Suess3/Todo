@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todo-v103';
+const CACHE_NAME = 'todo-v104';
 
 const PRECACHE = [
     './',
@@ -12,6 +12,8 @@ const PRECACHE = [
     './src/dragdrop.js',
     './src/save.js',
     './src/store.js',
+    './src/selection.js',
+    './src/history.js',
     './src/feedback.js',
     './src/settings.js',
     './src/todoService.js',

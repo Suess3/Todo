@@ -20,6 +20,8 @@ import { moveTodos, subscribeTodos, cleanupNotes } from './todoService.js';
 import { scheduleRender, setPage } from './render.js';
 import { flushDirty } from './save.js';
 import { applyTheme, applyAccent, applyBgBrightness, applyPattern, applyBannerPhoto, initBannerDrag, initSettings } from './settings.js';
+import { initHistory, clearHistory } from './history.js';
+import { initSelection, clearSelection } from './selection.js';
 
 let unsubscribe = null;
 let currentUid = null;
@@ -94,6 +96,8 @@ initAuth(
         document.getElementById('signout-btn').onclick = signOutUser;
         initSettings();
         initCharts();
+        initHistory();
+        initSelection();
 
         try { await moveTodos(user.uid); } catch (e) { console.error('moveTodos:', e); }
         try { await cleanupNotes(user.uid); } catch (e) { console.error('cleanupNotes:', e); }
@@ -109,6 +113,8 @@ initAuth(
     },
     () => {
         currentUid = null;
+        clearSelection();
+        clearHistory();
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         if (saveInterval) { clearInterval(saveInterval); saveInterval = null; }
         showAuth();

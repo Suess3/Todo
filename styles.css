@@ -878,3 +878,26 @@ body {
     from { transform: translateY(20px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
 }
+
+/* Cross-row selection (selection.js). A tint only — no size or spacing change,
+   so marking rows never shifts the layout. */
+.todo-row.row-selected {
+    background: rgba(66, 133, 244, 0.22);
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    border-radius: 6px;
+}
+
+/* While a row drag is running, stop the browser from also painting a text
+   selection underneath the row highlight */
+body.selecting-rows,
+body.selecting-rows .todo-input {
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+}
+
+.settings-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+.settings-btn:disabled:hover { color: var(--text-faint); }

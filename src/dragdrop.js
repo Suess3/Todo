@@ -6,6 +6,7 @@ import { auth } from './firebase.js';
 import { updateSortOrder } from './todoService.js';
 import { todos, dirtyIds, currentPage, rerender } from './store.js';
 import { updateSaveStatus, showToast } from './feedback.js';
+import { recordReorder } from './history.js';
 
 function initDragAndDrop() {
     const container = document.getElementById('app-content');
@@ -189,6 +190,7 @@ function handleDrop(draggedId, prevId, nextId) {
 
     const idx = todos.findIndex(t => t.id === draggedId);
     if (idx !== -1) {
+        recordReorder(draggedId, todos[idx].sortOrder);
         todos[idx] = { ...todos[idx], sortOrder: newSortOrder };
         todos.sort((a, b) => a.sortOrder - b.sortOrder);
         rerender(todos);

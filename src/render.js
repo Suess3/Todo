@@ -12,6 +12,8 @@ import { todos, setTodos, dirtyIds, currentPage, setCurrentPage, focusTarget, se
 import { showToast } from './feedback.js';
 import { scheduleSave, attachBlurSave, commitTempTodo } from './save.js';
 import { createNoteRow, updateNoteRow, placeCaretAtStart, placeCaretAtEnd, placeCaretAtTextOffset } from './notes.js';
+import { recordChange, recordToggle } from './history.js';
+import { applySelectionClasses, clearSelection } from './selection.js';
 import './dragdrop.js';
 
 const expandedStates = {};
@@ -113,6 +115,8 @@ function createCheckbox(uid, isDone, todayUnchecked = false) {
         const current = todos.find(t => t.id === id);
         if (!current) return;
         const newState = !current.isDone;
+        const countsProductivity = newState && (!current.page || current.page === 'todo');
+        recordToggle(id, current.isDone, current.moveCount || 0, countsProductivity);
         if (newState) {
             triggerCheckAnimation(wrapper);
             // Only record productivity for the main todo page
@@ -146,6 +150,7 @@ function updateCheckbox(wrapper, isDone, todayUnchecked) {
 
 export function setPage(page) {
     cancelTypingAnimation();
+    clearSelection();
     setCurrentPage(page);
     renderApp(todos);
 }
@@ -200,6 +205,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
         try {
             const todoId = input.dataset.id;
             const siblings = getSiblings();
+            const originalText = input.value;
             const cursor = input.selectionStart;
             const before = input.value.slice(0, cursor);
             const after = input.value.slice(cursor);
@@ -224,7 +230,8 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
             setFocusTarget({ id: tempId, cursor: 0 });
             renderApp(todos);
 
-            await commitTempTodo(tempId, persistTodo(after, newSortOrder));
+            const split = await commitTempTodo(tempId, persistTodo(after, newSortOrder));
+            if (split) recordChange({ created: [split.id], textRestores: [{ id: todoId, text: originalText }] });
         } finally {
             enterInFlight = false;
         }
@@ -244,6 +251,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
             const prev = siblings[sibIdx - 1];
 
             if (!prev && input.value === '') {
+                recordChange({ removed: [{ ...todos.find(t => t.id === todoId) }] });
                 setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
                 renderApp(todos);
@@ -254,6 +262,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
 
             if (input.value === '') {
                 setFocusTarget({ id: prev.id, cursor: prev.text.length });
+                recordChange({ removed: [{ ...todos.find(t => t.id === todoId) }] });
                 setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
                 renderApp(todos);
@@ -268,6 +277,10 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
                 // would otherwise make the reconcile below skip refreshing its (already-rendered) value
                 const prevEl = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
                 if (prevEl) prevEl.value = mergedText;
+                recordChange({
+                    removed: [{ ...todos.find(t => t.id === todoId) }],
+                    textRestores: [{ id: prev.id, text: prev.text }],
+                });
                 setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
                 setFocusTarget({ id: prev.id, cursor: splitCursor });
@@ -482,6 +495,8 @@ export function renderApp(renderTodos) {
         }
         setFocusTarget(null);
     }
+
+    applySelectionClasses();
 }
 
 setRenderer(renderApp);

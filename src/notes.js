@@ -9,6 +9,7 @@ import { addTodo, deleteTodo, setIsToggle, setCollapsed, setParent } from './tod
 import { todos, setTodos, dirtyIds, currentPage, setFocusTarget, flatDepthMap, rerender } from './store.js';
 import { showToast } from './feedback.js';
 import { scheduleSave, attachBlurSave, commitTempTodo } from './save.js';
+import { recordChange } from './history.js';
 import { t } from './i18n.js';
 
 export function isMobileViewport() {
@@ -152,13 +153,16 @@ function splitContentEditableAtCursor(el) {
 // --- Toggle helpers ---
 
 // Deleting a toggle shouldn't orphan its children — reparent them to the toggle's own parent first.
-function promoteChildren(uid, todoId) {
+// Lifts a row's children one level before it disappears, so nothing is orphaned.
+// Returns what it changed ({ id, previousParentId }) so undo can hang them back.
+export function promoteChildren(uid, todoId) {
     const children = todos.filter(t => t.parentId === todoId);
-    if (children.length === 0) return;
+    if (children.length === 0) return [];
     const deleted = todos.find(t => t.id === todoId);
     const newParentId = deleted?.parentId || null;
     setTodos(todos.map(t => t.parentId === todoId ? { ...t, parentId: newParentId } : t));
     children.forEach(c => setParent(uid, c.id, newParentId).catch(e => console.error(e)));
+    return children.map(c => ({ id: c.id, previousParentId: todoId }));
 }
 
 function createToggleCaret(todo, uid) {
@@ -342,7 +346,8 @@ function attachNoteKeyboard(input, uid) {
                 ]);
                 setFocusTarget({ id: todoId, cursor: 'start' });
                 rerender(todos);
-                await commitTempTodo(tempId, persistWithToggleFlags('', newSortOrder, parentId, current.isToggle));
+                const inserted = await commitTempTodo(tempId, persistWithToggleFlags('', newSortOrder, parentId, current.isToggle));
+                if (inserted) recordChange({ created: [inserted.id] });
                 return;
             }
 
@@ -376,7 +381,8 @@ function attachNoteKeyboard(input, uid) {
             ]);
             setFocusTarget({ id: tempId, cursor: 'start' });
             rerender(todos);
-            await commitTempTodo(tempId, persistWithToggleFlags(after, newSortOrder, parentId, newIsToggle));
+            const split = await commitTempTodo(tempId, persistWithToggleFlags(after, newSortOrder, parentId, newIsToggle));
+            if (split) recordChange({ created: [split.id], textRestores: [{ id: todoId, text: current.text }] });
         } finally {
             enterInFlight = false;
         }
@@ -416,7 +422,9 @@ function attachNoteKeyboard(input, uid) {
             const prev = siblings[sibIdx - 1];
 
             if (!prev && input.textContent === '') {
-                promoteChildren(uid, todoId);
+                const removed = { ...todos.find(t => t.id === todoId) };
+                const reparented = promoteChildren(uid, todoId);
+                recordChange({ removed: [removed], reparented });
                 setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
                 rerender(todos);
@@ -427,7 +435,9 @@ function attachNoteKeyboard(input, uid) {
 
             if (input.textContent === '') {
                 setFocusTarget({ id: prev.id, cursor: 'end' });
-                promoteChildren(uid, todoId);
+                const removed = { ...todos.find(t => t.id === todoId) };
+                const reparented = promoteChildren(uid, todoId);
+                recordChange({ removed: [removed], reparented });
                 setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
                 rerender(todos);
@@ -442,7 +452,9 @@ function attachNoteKeyboard(input, uid) {
                 // would otherwise make the reconcile below skip refreshing its (already-rendered) content
                 const prevEl = document.querySelector(`.todo-input[data-id="${prev.id}"]`);
                 if (prevEl) prevEl.innerHTML = sanitizeNoteHtml(mergedText);
-                promoteChildren(uid, todoId);
+                const removed = { ...todos.find(t => t.id === todoId) };
+                const reparented = promoteChildren(uid, todoId);
+                recordChange({ removed: [removed], reparented, textRestores: [{ id: prev.id, text: prev.text }] });
                 setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
                 // Land the cursor at the join point (where the deleted line used to start),

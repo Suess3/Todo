@@ -63,6 +63,24 @@ export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now(),
     });
 }
 
+// Re-creates a deleted todo for undo. The original document is gone, so this
+// hands back a new id — callers remap anything that pointed at the old one.
+export async function restoreTodo(uid, data) {
+    return addDoc(todosRef(uid), {
+        text: data.text ?? '',
+        isDone: !!data.isDone,
+        dateEpochDay: data.dateEpochDay ?? 0,
+        sortOrder: data.sortOrder ?? Date.now(),
+        moveCount: data.moveCount ?? 0,
+        page: data.page ?? 'todo',
+        parentId: data.parentId ?? null,
+        isToggle: !!data.isToggle,
+        collapsed: !!data.collapsed,
+        createdAt: data.createdAt ?? Date.now(),
+        completedAt: data.completedAt ?? null,
+    });
+}
+
 export async function toggleTodo(uid, id, newState) {
     return updateDoc(doc(db, 'users', uid, 'todos', id), {
         isDone: newState,
@@ -119,8 +137,9 @@ function localDayKey() {
 
 // Records a todo completion into the daily productivity summary.
 // Uses Firestore increment so concurrent writes from multiple devices don't conflict.
-export async function recordProductivity(uid, moveCount) {
+// delta is -1 when undo takes a completion back off the counter
+export async function recordProductivity(uid, moveCount, delta = 1) {
     const bucket = String(Math.min(moveCount || 0, 5));
     const ref = doc(db, 'users', uid, 'productivity', localDayKey());
-    await setDoc(ref, { [bucket]: increment(1) }, { merge: true });
+    await setDoc(ref, { [bucket]: increment(delta) }, { merge: true });
 }

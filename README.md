@@ -14,6 +14,8 @@ A personal todo and notes app, built as an installable PWA. Vanilla JavaScript w
 - Works offline — Firestore persistence plus a cache-first service worker; updates install silently in the background
 - Real-time sync across devices
 - Drag & drop reordering (drag handle on desktop, long-press on mobile)
+- Drag across rows to select them, delete or copy the whole range at once (desktop)
+- Undo for structural changes — 50 steps, via the header button or Cmd/Ctrl+Z
 - Productivity charts: completed todos bucketed by how often they were postponed
 - Theming: light/dark, accent color, background shade, patterns, and a custom banner photo
 - English and German interface
@@ -37,6 +39,8 @@ src/
   firebase.js       Firebase initialization
   todoService.js    Firestore reads/writes
   render.js         DOM-diffing renderer, keyboard handling, drag & drop
+  selection.js      cross-row selection and multi-delete
+  history.js        undo stack
   settings.js       theme, colors, patterns, banner (localStorage)
   i18n.js           EN/DE strings
   charts.js         productivity charts
