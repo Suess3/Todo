@@ -73,3 +73,13 @@ NOTES.md
 
 # macOS
 .DS_Store
+
+# Shared agent knowledge base (Claude Code + Codex) — lives only in OneDrive
+CLAUDE.md
+AGENTS.md
+MEMORY.md
+TODO.md
+/memory/
+/history/
+/skills/
+/docs/
