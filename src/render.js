@@ -25,6 +25,13 @@ const ANIM_KEY = 'todo-animated-day';
 const PASTEL_COLORS = ['#F0DC8A', '#F0C880', '#F0B478', '#F0A074', '#EE9090'];
 const VIVID_COLORS  = ['#E8C420', '#E89028', '#E06828', '#D44A28', '#C83232'];
 const SOON_COLORS   = ['#E8D99A', '#E0B98A', '#E09090']; // 1 week, 2 weeks, 3+ weeks
+// Same hues for the light theme, darkened: the pastels above are made for a dark
+// background and are barely readable on white
+const LIGHT_SOFT_COLORS  = ['#8F6B00', '#A65A00', '#B04A12', '#B0382A', '#B02A2A'];
+const LIGHT_VIVID_COLORS = ['#7A5A00', '#944C00', '#9E3A08', '#9C2A1C', '#9A1A1A'];
+const LIGHT_SOON_COLORS  = ['#8F6B00', '#A65A00', '#B0382A'];
+
+const isLightTheme = () => document.body.getAttribute('data-theme') === 'light';
 
 function lerpColor(hex1, hex2, t) {
     const p = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
@@ -36,12 +43,14 @@ function lerpColor(hex1, hex2, t) {
 function urgencyColor(moveCount, intensity) {
     if (intensity === 0) return 'var(--text)';
     const idx = Math.min(moveCount - 1, 4);
-    const isDark = document.body.getAttribute('data-theme') !== 'light';
-    const neutral = isDark ? '#FFFFFF' : '#121212';
+    const light = isLightTheme();
+    const neutral = light ? '#121212' : '#FFFFFF';
+    const soft = light ? LIGHT_SOFT_COLORS : PASTEL_COLORS;
+    const vivid = light ? LIGHT_VIVID_COLORS : VIVID_COLORS;
     if (intensity <= 50) {
-        return lerpColor(neutral, PASTEL_COLORS[idx], intensity / 50);
+        return lerpColor(neutral, soft[idx], intensity / 50);
     } else {
-        return lerpColor(PASTEL_COLORS[idx], VIVID_COLORS[idx], (intensity - 50) / 50);
+        return lerpColor(soft[idx], vivid[idx], (intensity - 50) / 50);
     }
 }
 
@@ -336,9 +345,10 @@ function calendarTextColor(todo, isPast, urgencyIntensity) {
 function applySoonColor(input, todo) {
     if (currentPage !== 'soon' || todo.isDone || !todo.createdAt) { input.style.color = ''; return; }
     const ageWeeks = (Date.now() - todo.createdAt) / (7 * 24 * 60 * 60 * 1000);
-    if (ageWeeks >= 3)      input.style.color = SOON_COLORS[2];
-    else if (ageWeeks >= 2) input.style.color = SOON_COLORS[1];
-    else if (ageWeeks >= 1) input.style.color = SOON_COLORS[0];
+    const colors = isLightTheme() ? LIGHT_SOON_COLORS : SOON_COLORS;
+    if (ageWeeks >= 3)      input.style.color = colors[2];
+    else if (ageWeeks >= 2) input.style.color = colors[1];
+    else if (ageWeeks >= 1) input.style.color = colors[0];
     else                    input.style.color = '';
 }
 
@@ -664,7 +674,7 @@ function reconcileDaySection(section, dateEpoch, today, dayTodos, uid) {
         addBtn = buildAddBtn(dayTodos.length === 0, t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast(t('err_create_todo'), 'error'); console.error(e); }));
         list.appendChild(addBtn);
     }
-    if (addBtn) addBtn.textContent = dayTodos.length === 0 ? t('no_tasks') : '';
+    if (addBtn) setAddBtnText(addBtn, dayTodos.length === 0, t('no_tasks'));
 
     reconcileRows(
         list, dayTodos, addBtn,
@@ -682,7 +692,7 @@ function buildDayHeader(dateEpoch, today) {
     header.innerHTML = `
         <span class="weekday ${isToday ? 'today' : ''}">${getDayName(dateEpoch)}</span>
         <span class="date-small">${formatDate(dateEpoch)}</span>
-        <span class="toggle-icon ${isOpen ? '' : 'closed'}">▼</span>
+        <span class="toggle-icon ${isOpen ? '' : 'closed'}"></span>
     `;
     header.addEventListener('click', () => {
         expandedStates[dateEpoch] = !(expandedStates[dateEpoch] ?? dateEpoch >= getTodayEpoch());
@@ -691,10 +701,16 @@ function buildDayHeader(dateEpoch, today) {
     return header;
 }
 
+// Empty list: the hint text. Otherwise a small "+" under the checkbox column
+function setAddBtnText(btn, isEmpty, emptyText) {
+    btn.textContent = isEmpty ? emptyText : '+';
+    btn.classList.toggle('is-plus', !isEmpty);
+}
+
 function buildAddBtn(isEmpty, emptyText, onClick) {
     const btn = document.createElement('div');
     btn.className = 'tap-to-add';
-    if (isEmpty) btn.textContent = emptyText;
+    setAddBtnText(btn, isEmpty, emptyText);
     btn.addEventListener('click', onClick);
     return btn;
 }
@@ -745,6 +761,7 @@ function reconcileFlatView(container, renderTodos, uid) {
         list.className = 'todo-list flat-list';
         container.appendChild(list);
     }
+    list.dataset.page = currentPage;
 
     const existingById = new Map();
     list.querySelectorAll('.todo-row[data-id]').forEach(row => existingById.set(row.dataset.id, row));
@@ -754,7 +771,7 @@ function reconcileFlatView(container, renderTodos, uid) {
         addBtn = buildAddBtn(pageTodos.length === 0, t('no_items'), () => addTodo(uid, 0, '', Date.now(), currentPage).catch(e => { showToast(t('err_create_item'), 'error'); console.error(e); }));
         list.appendChild(addBtn);
     }
-    addBtn.textContent = pageTodos.length === 0 ? t('no_items') : '';
+    setAddBtnText(addBtn, pageTodos.length === 0, t('no_items'));
 
     const isNotes = currentPage === 'keepInMind';
     reconcileRows(

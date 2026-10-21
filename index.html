@@ -68,10 +68,10 @@
                 </div>
                 <div class="setting-row">
                     <span data-i18n="language">Language</span>
-                    <label class="toggle">
-                        <input type="checkbox" id="lang-toggle">
-                        <span class="toggle-slider"></span>
-                    </label>
+                    <div class="pattern-picker lang-picker" id="lang-picker">
+                        <button class="pattern-btn" data-lang="de">DE</button>
+                        <button class="pattern-btn" data-lang="en">EN</button>
+                    </div>
                 </div>
                 <div class="setting-row">
                     <span data-i18n="urgency_intensity">Urgency coloring intensity</span>
@@ -110,13 +110,13 @@
                 <input type="file" id="banner-file-input" accept="image/*" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none">
                 <div class="setting-row">
                     <button id="signout-btn" class="signout-btn danger" data-i18n="sign_out">Sign out</button>
+                    <span id="version-label" class="version-label"></span>
                 </div>
             </div>
         </div>
 
         <div id="app-banner">
             <div class="app-header">
-                <span id="version-label" class="version-label"></span>
                 <span id="save-status" class="save-status hidden"></span>
                 <button id="undo-btn" class="settings-btn" title="Undo" disabled>↩</button>
                 <button id="charts-btn" class="settings-btn" title="Productivity">◑</button>

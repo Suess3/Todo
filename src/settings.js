@@ -176,6 +176,8 @@ function setTheme(theme) {
     applyBgBrightness();
     // The pattern ink is theme-dependent (white on dark, black on light)
     applyPattern();
+    // Urgency and age colors have their own light-theme palette
+    document.dispatchEvent(new CustomEvent('urgency-changed'));
 }
 
 // --- Settings Modal ---
@@ -202,12 +204,11 @@ export function initSettings() {
         setTheme(themeToggle.checked ? 'light' : 'dark');
     });
 
-    // Language toggle (checked = DE)
-    const langToggle = document.getElementById('lang-toggle');
-    langToggle.checked = getLang() === 'de';
-    langToggle.addEventListener('change', () => {
-        setLang(langToggle.checked ? 'de' : 'en');
-    });
+    // Language picker (DE | EN)
+    const langButtons = document.querySelectorAll('#lang-picker .pattern-btn');
+    const markLang = () => langButtons.forEach(b => b.classList.toggle('active', b.dataset.lang === getLang()));
+    langButtons.forEach(btn => btn.addEventListener('click', () => { setLang(btn.dataset.lang); markLang(); }));
+    markLang();
 
     // Urgency slider
     const urgencySlider = document.getElementById('urgency-slider');
@@ -236,7 +237,7 @@ export function initSettings() {
     // Pattern picker
     const patternOpacityRow = document.getElementById('pattern-opacity-row');
     const patternSlider = document.getElementById('pattern-slider');
-    const patternBtns = document.querySelectorAll('.pattern-btn');
+    const patternBtns = document.querySelectorAll('#pattern-picker .pattern-btn');
     const savedPattern = localStorage.getItem(BG_PATTERN_KEY) || 'none';
     patternSlider.value = parseInt(localStorage.getItem(BG_PATTERN_OPACITY_KEY) ?? '30');
     patternOpacityRow.classList.toggle('hidden', savedPattern === 'none');

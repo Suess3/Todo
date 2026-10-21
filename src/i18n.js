@@ -4,7 +4,7 @@ const translations = {
     en: {
         settings: 'Settings',
         light_mode: 'Light mode',
-        language: 'English',
+        language: 'Language',
         urgency_intensity: 'Urgency coloring intensity',
         main_color: 'Main color',
         bg_shade: 'Background shade',
@@ -74,7 +74,7 @@ const translations = {
     de: {
         settings: 'Einstellungen',
         light_mode: 'Helles Design',
-        language: 'Deutsch',
+        language: 'Sprache',
         urgency_intensity: 'Dringlichkeits-Färbung',
         main_color: 'Hauptfarbe',
         bg_shade: 'Hintergrundfarbe',
