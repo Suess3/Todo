@@ -361,6 +361,19 @@ body {
     background: transparent;
 }
 
+/* Cross-day drop on the calendar. The indicator nets out to zero height
+   (negative margins), so nothing shifts while it moves between rows. */
+.day-header.drop-target { border-bottom-color: var(--accent); }
+.day-header.drop-target .weekday,
+.day-header.drop-target .date-small { color: var(--accent); }
+.drop-indicator {
+    height: 2px;
+    margin: -1px 0;
+    background: var(--accent);
+    border-radius: 1px;
+    pointer-events: none;
+}
+
 /* Row "+" menu button (Notes) */
 .row-plus-btn {
     cursor: pointer;

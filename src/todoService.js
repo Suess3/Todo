@@ -114,6 +114,10 @@ export async function updateSortOrder(uid, id, sortOrder) {
     return updateDoc(doc(db, 'users', uid, 'todos', id), { sortOrder });
 }
 
+export async function moveTodoToDay(uid, id, dateEpochDay, sortOrder) {
+    return updateDoc(doc(db, 'users', uid, 'todos', id), { dateEpochDay, sortOrder });
+}
+
 export async function deleteTodo(uid, id) {
     return deleteDoc(doc(db, 'users', uid, 'todos', id));
 }

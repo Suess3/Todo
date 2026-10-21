@@ -207,6 +207,12 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
     const onEnter = async (e) => {
         if (e.key !== 'Enter') return;
         e.preventDefault();
+        // Cmd/Ctrl+Enter checks the row off — through the checkbox itself, so the
+        // animation, productivity counter and undo entry all stay in one place
+        if (e.metaKey || e.ctrlKey) {
+            if (e.type === 'keydown') input.closest('.todo-row')?.querySelector('.checkbox-wrapper')?.click();
+            return;
+        }
         if (enterInFlight) return;
         enterInFlight = true;
 
