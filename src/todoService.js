@@ -48,7 +48,7 @@ export function subscribeTodos(uid, callback) {
     });
 }
 
-export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now(), page = 'todo', parentId = null) {
+export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now(), page = 'todo', parentId = null, { isToggle = false, collapsed = false } = {}) {
     return addDoc(todosRef(uid), {
         text,
         isDone: false,
@@ -57,8 +57,8 @@ export async function addTodo(uid, dateEpoch, text = '', sortOrder = Date.now(),
         moveCount: 0,
         page,
         parentId,
-        isToggle: false,
-        collapsed: false,
+        isToggle,
+        collapsed,
         createdAt: Date.now(),
     });
 }

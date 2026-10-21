@@ -5,6 +5,7 @@
 import { auth } from './firebase.js';
 import { updateSortOrder } from './todoService.js';
 import { todos, dirtyIds, currentPage, rerender } from './store.js';
+import { t } from './i18n.js';
 import { updateSaveStatus, showToast } from './feedback.js';
 import { recordReorder } from './history.js';
 
@@ -208,7 +209,7 @@ function handleDrop(draggedId, prevId, nextId) {
                 })
                 .catch(e => {
                     dirtyIds.delete(draggedId);
-                    showToast('Failed to save order', 'error');
+                    showToast(t('err_save_order'), 'error');
                     console.error(e);
                     updateSaveStatus('error');
                 });

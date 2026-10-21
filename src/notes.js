@@ -191,7 +191,7 @@ function createToggleCaret(todo, uid) {
             setFocusTarget({ id: tempId, cursor: 'start' });
             rerender(todos);
             setCollapsed(uid, id, false).catch(e => console.error(e));
-            commitTempTodo(tempId, addTodo(uid, 0, '', newSortOrder, currentPage, id), 'Failed to create item');
+            commitTempTodo(tempId, addTodo(uid, 0, '', newSortOrder, currentPage, id), t('err_create_item'));
             return;
         }
 
@@ -313,19 +313,12 @@ function attachNoteKeyboard(input, uid) {
             const siblings = getSiblings();
             const sibIdx = siblings.findIndex(t => t.id === todoId);
 
-            // The toggle flags have to be written before commitTempTodo swaps the temp id —
+            // The toggle flags have to be in Firestore before commitTempTodo swaps the temp id —
             // once the swap lands, renders are no longer suppressed and a snapshot without
             // the flags would briefly render the new row as a plain line.
+            // Part of the create itself, so the row is never visible without them.
             const persistWithToggleFlags = (text, sortOrder, parentId, asToggle) =>
-                addTodo(uid, 0, text, sortOrder, currentPage, parentId).then(async newDoc => {
-                    if (asToggle) {
-                        await Promise.all([
-                            setIsToggle(uid, newDoc.id, true),
-                            setCollapsed(uid, newDoc.id, true),
-                        ]).catch(err => console.error(err));
-                    }
-                    return newDoc;
-                });
+                addTodo(uid, 0, text, sortOrder, currentPage, parentId, asToggle ? { isToggle: true, collapsed: true } : {});
 
             if (before === '') {
                 // Cursor was at the very start: insert an empty sibling BEFORE this row instead of
@@ -428,7 +421,7 @@ function attachNoteKeyboard(input, uid) {
                 setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
                 rerender(todos);
-                deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
+                deleteTodo(uid, todoId).catch(err => { showToast(t('err_delete'), 'error'); console.error(err); });
                 return;
             }
             if (!prev) return;
@@ -441,7 +434,7 @@ function attachNoteKeyboard(input, uid) {
                 setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
                 rerender(todos);
-                deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
+                deleteTodo(uid, todoId).catch(err => { showToast(t('err_delete'), 'error'); console.error(err); });
             } else {
                 const prevIdx = todos.findIndex(t => t.id === prev.id);
                 const splitOffset = plainTextLength(prev.text);
@@ -461,7 +454,7 @@ function attachNoteKeyboard(input, uid) {
                 // not at the very end of the merged text
                 setFocusTarget({ id: prev.id, cursor: splitOffset });
                 rerender(todos);
-                deleteTodo(uid, todoId).catch(err => { showToast('Failed to delete', 'error'); console.error(err); });
+                deleteTodo(uid, todoId).catch(err => { showToast(t('err_delete'), 'error'); console.error(err); });
             }
             return;
         }
@@ -566,7 +559,13 @@ function renderFormatToolbarColors(bar) {
 }
 
 function showFormatToolbar(rect) {
-    hideFormatToolbar();
+    // selectionchange fires on every step of a drag-select — move the existing bar
+    // instead of rebuilding it (rebuilding flickered and reset an open color picker)
+    if (formatToolbarEl) {
+        formatToolbarRect = rect;
+        positionFormatToolbar(formatToolbarEl, rect);
+        return;
+    }
     const bar = document.createElement('div');
     bar.className = 'format-toolbar';
     document.body.appendChild(bar);
@@ -638,7 +637,7 @@ function convertRowToToggle(todo, uid) {
         setCollapsed(uid, todo.id, true),
     ])
         .then(() => dirtyIds.delete(todo.id))
-        .catch(e => { dirtyIds.delete(todo.id); showToast('Failed to convert', 'error'); console.error(e); });
+        .catch(e => { dirtyIds.delete(todo.id); showToast(t('err_convert'), 'error'); console.error(e); });
 }
 
 document.addEventListener('pointerdown', (e) => {

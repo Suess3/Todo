@@ -10,6 +10,7 @@
 import { auth } from './firebase.js';
 import { deleteTodo } from './todoService.js';
 import { todos, setTodos, dirtyIds, selectedIds, rerender } from './store.js';
+import { t } from './i18n.js';
 import { showToast } from './feedback.js';
 import { promoteChildren } from './notes.js';
 import { recordChange } from './history.js';
@@ -87,7 +88,7 @@ export async function deleteSelectedRows() {
     const results = await Promise.allSettled([...ids].map(id => deleteTodo(uid, id)));
     const failed = results.filter(r => r.status === 'rejected');
     if (failed.length > 0) {
-        showToast('Failed to delete', 'error');
+        showToast(t('err_delete'), 'error');
         failed.forEach(r => console.error(r.reason));
     }
 }

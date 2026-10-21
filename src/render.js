@@ -50,7 +50,11 @@ document.addEventListener('lang-changed', () => renderApp(todos));
 
 // --- Typing animation (first open of the day) ---
 
+// Only when someone is looking and nobody is typing: a rollover can happen in a
+// background tab or with the cursor sitting in today's list
 function shouldAnimate(todayEpoch) {
+    if (document.visibilityState !== 'visible') return false;
+    if (document.activeElement?.classList.contains('todo-input')) return false;
     const last = parseInt(localStorage.getItem(ANIM_KEY) || '0');
     return last !== todayEpoch;
 }
@@ -131,7 +135,7 @@ function createCheckbox(uid, isDone, todayUnchecked = false) {
             }
         }
         toggleTodo(uid, id, newState).catch(e => {
-            showToast('Failed to update status', 'error');
+            showToast(t('err_update_status'), 'error');
             console.error(e);
         });
     });
@@ -147,6 +151,8 @@ function updateCheckbox(wrapper, isDone, todayUnchecked) {
 }
 
 // --- Public API ---
+
+const isCoarsePointer = window.matchMedia('(pointer: coarse)');
 
 export function setPage(page) {
     cancelTypingAnimation();
@@ -167,21 +173,25 @@ export function scheduleRender(newTodos) {
     }));
     // Skip re-render while an Enter is in flight — avoids losing the temp todo + focus
     if (pendingTodos.length > 0) return;
-    // Skip re-render while user is actively editing — insertBefore triggers iOS keyboard dismissal
+    // Touch only: skip re-render while the user is editing — moving the focused row
+    // dismisses the iOS keyboard. Desktop renders anyway (renderApp keeps the focus),
+    // otherwise an always-open laptop tab never shows edits made on the phone.
     // Only skip if todo inputs are already in the DOM (i.e. not the initial render)
-    if (document.querySelector('.todo-input') && document.activeElement?.classList.contains('todo-input')) return;
+    if (isCoarsePointer.matches && document.querySelector('.todo-input') && document.activeElement?.classList.contains('todo-input')) return;
     renderApp(todos);
 }
 
 // --- Format helpers ---
 
+// Epochs are UTC midnights of the local calendar date (getTodayEpoch), so they
+// have to be read back in UTC — local getters return the previous day west of UTC
 function formatDate(epoch) {
     const d = new Date(epoch * 86400000);
-    return d.getDate().toString().padStart(2, '0') + '. ' + t('month_' + d.getMonth());
+    return d.getUTCDate().toString().padStart(2, '0') + '. ' + t('month_' + d.getUTCMonth());
 }
 
 function getDayName(epoch) {
-    return t('day_' + new Date(epoch * 86400000).getDay());
+    return t('day_' + new Date(epoch * 86400000).getUTCDay());
 }
 
 // --- Keyboard handler (textarea-based rows: todo/soon/longRun) ---
@@ -255,7 +265,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
                 setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
                 renderApp(todos);
-                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
+                deleteTodo(uid, todoId).catch(e => { showToast(t('err_delete'), 'error'); console.error(e); });
                 return;
             }
             if (!prev) return;
@@ -266,7 +276,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
                 setTodos(todos.filter(t => t.id !== todoId));
                 dirtyIds.delete(todoId);
                 renderApp(todos);
-                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
+                deleteTodo(uid, todoId).catch(e => { showToast(t('err_delete'), 'error'); console.error(e); });
             } else {
                 const mergedText = prev.text + input.value;
                 const splitCursor = prev.text.length;
@@ -285,7 +295,7 @@ function attachKeyboard(input, uid, getSiblings, makeTempTodo, persistTodo) {
                 dirtyIds.delete(todoId);
                 setFocusTarget({ id: prev.id, cursor: splitCursor });
                 renderApp(todos);
-                deleteTodo(uid, todoId).catch(e => { showToast('Failed to delete', 'error'); console.error(e); });
+                deleteTodo(uid, todoId).catch(e => { showToast(t('err_delete'), 'error'); console.error(e); });
             }
         }
 
@@ -451,19 +461,50 @@ function updateFlatRow(row, todo) {
 
 // Reuses existing DOM rows by key (data-id), moves them into correct order, removes stale ones.
 // Existing rows are updated in place — the focused input is never destroyed.
+// Rows are only moved when they're actually out of place: every insertBefore of a
+// row detaches it, which blurs a focused input and costs a layout pass.
 function reconcileRows(list, rowTodos, anchor, existingById, createRow, updateRow) {
-    rowTodos.forEach(todo => {
-        let row = existingById.get(todo.id);
-        if (row) {
-            updateRow(row, todo);
-            existingById.delete(todo.id);
-        } else {
-            row = createRow(todo);
-        }
-        list.insertBefore(row, anchor);
+    const rows = rowTodos.map(todo => {
+        const row = existingById.get(todo.id);
+        if (!row) return createRow(todo);
+        updateRow(row, todo);
+        existingById.delete(todo.id);
+        return row;
     });
     // Anything left in existingById was not in the new list — remove it
     existingById.forEach(row => row.remove());
+    // Walk backwards from the anchor so each check compares against final positions
+    let next = anchor;
+    for (let i = rows.length - 1; i >= 0; i--) {
+        if (rows[i].nextSibling !== next || rows[i].parentNode !== list) list.insertBefore(rows[i], next);
+        next = rows[i];
+    }
+}
+
+// A reorder can still have to move the focused row; put the focus and caret back
+// so a background sync never interrupts typing.
+function captureFocus() {
+    const el = document.activeElement;
+    if (!el?.classList.contains('todo-input')) return null;
+    if (el.isContentEditable) {
+        const sel = window.getSelection();
+        if (!sel.rangeCount || !el.contains(sel.anchorNode)) return { el, offset: null };
+        const pre = document.createRange();
+        pre.selectNodeContents(el);
+        pre.setEnd(sel.getRangeAt(0).startContainer, sel.getRangeAt(0).startOffset);
+        return { el, offset: pre.toString().length };
+    }
+    return { el, start: el.selectionStart, end: el.selectionEnd };
+}
+
+function restoreFocus(saved) {
+    if (!saved || document.activeElement === saved.el || !saved.el.isConnected) return;
+    saved.el.focus({ preventScroll: true });
+    if (saved.el.isContentEditable) {
+        if (saved.offset !== null) placeCaretAtTextOffset(saved.el, saved.offset);
+    } else {
+        saved.el.setSelectionRange(saved.start, saved.end);
+    }
 }
 
 // --- Main entry point ---
@@ -473,12 +514,14 @@ export function renderApp(renderTodos) {
     if (!uid || isAnimating) return;
 
     const container = document.getElementById('app-content');
+    const focused = focusTarget ? null : captureFocus();
 
     if (currentPage === 'todo') {
         reconcileCalendarView(container, renderTodos, uid);
     } else {
         reconcileFlatView(container, renderTodos, uid);
     }
+    restoreFocus(focused);
 
     // Restore focus after Enter (new todo) or Backspace (merge) operations
     if (focusTarget) {
@@ -503,10 +546,18 @@ setRenderer(renderApp);
 
 // --- Calendar view ---
 
+let renderedToday = null;
+
 function reconcileCalendarView(container, renderTodos, uid) {
     container.querySelectorAll('.flat-list').forEach(el => el.remove());
 
     const today = getTodayEpoch();
+    // New day while the app stayed open: start from the same open/closed state a
+    // fresh load would have, so yesterday folds away instead of staying expanded
+    if (renderedToday !== null && renderedToday !== today) {
+        Object.keys(expandedStates).forEach(k => delete expandedStates[k]);
+    }
+    renderedToday = today;
     const epochs = Array.from({ length: 8 }, (_, i) => today - 1 + i);
     const epochSet = new Set(epochs);
 
@@ -572,7 +623,7 @@ function buildDaySection(dateEpoch, today, dayTodos, uid) {
     const urgencyIntensity = getUrgencyIntensity();
     dayTodos.forEach(todo => list.appendChild(createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensity)));
 
-    if (isOpen) list.appendChild(buildAddBtn(dayTodos.length === 0, t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast('Failed to create todo', 'error'); console.error(e); })));
+    if (isOpen) list.appendChild(buildAddBtn(dayTodos.length === 0, t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast(t('err_create_todo'), 'error'); console.error(e); })));
 
     section.appendChild(list);
     return section;
@@ -584,7 +635,10 @@ function reconcileDaySection(section, dateEpoch, today, dayTodos, uid) {
     const isOpen = expandedStates[dateEpoch] ?? !isPast;
 
     const weekdayEl = section.querySelector('.weekday');
-    if (weekdayEl) weekdayEl.textContent = getDayName(dateEpoch);
+    if (weekdayEl) {
+        weekdayEl.textContent = getDayName(dateEpoch);
+        weekdayEl.classList.toggle('today', isToday);
+    }
     const dateEl = section.querySelector('.date-small');
     if (dateEl) dateEl.textContent = formatDate(dateEpoch);
 
@@ -601,7 +655,7 @@ function reconcileDaySection(section, dateEpoch, today, dayTodos, uid) {
     let addBtn = list.querySelector('.tap-to-add');
     if (!isOpen && addBtn) { addBtn.remove(); addBtn = null; }
     if (isOpen && !addBtn) {
-        addBtn = buildAddBtn(dayTodos.length === 0, t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast('Failed to create todo', 'error'); console.error(e); }));
+        addBtn = buildAddBtn(dayTodos.length === 0, t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast(t('err_create_todo'), 'error'); console.error(e); }));
         list.appendChild(addBtn);
     }
     if (addBtn) addBtn.textContent = dayTodos.length === 0 ? t('no_tasks') : '';
@@ -625,7 +679,7 @@ function buildDayHeader(dateEpoch, today) {
         <span class="toggle-icon ${isOpen ? '' : 'closed'}">▼</span>
     `;
     header.addEventListener('click', () => {
-        expandedStates[dateEpoch] = !expandedStates[dateEpoch];
+        expandedStates[dateEpoch] = !(expandedStates[dateEpoch] ?? dateEpoch >= getTodayEpoch());
         renderApp(todos);
     });
     return header;
@@ -691,7 +745,7 @@ function reconcileFlatView(container, renderTodos, uid) {
 
     let addBtn = list.querySelector('.tap-to-add');
     if (!addBtn) {
-        addBtn = buildAddBtn(pageTodos.length === 0, t('no_items'), () => addTodo(uid, 0, '', Date.now(), currentPage).catch(e => { showToast('Failed to create item', 'error'); console.error(e); }));
+        addBtn = buildAddBtn(pageTodos.length === 0, t('no_items'), () => addTodo(uid, 0, '', Date.now(), currentPage).catch(e => { showToast(t('err_create_item'), 'error'); console.error(e); }));
         list.appendChild(addBtn);
     }
     addBtn.textContent = pageTodos.length === 0 ? t('no_items') : '';

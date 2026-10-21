@@ -1,3 +1,14 @@
+/* Self-hosted (was Google Fonts): the cross-origin font response is opaque, so the
+   service worker never cached it and offline starts fell back to plain serif.
+   IM Fell English, SIL Open Font License 1.1 — latin subset. */
+@font-face {
+    font-family: 'IM Fell English';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url(fonts/im-fell-english-latin.woff2) format('woff2');
+}
+
 /* --- THEME VARIABLES --- */
 :root {
     --bg: #121212;
@@ -215,6 +226,7 @@ body {
     transition: opacity 0.3s;
 }
 .save-status.error { color: #ff4444; }
+.save-status.offline { color: var(--text-muted); }
 
 .app-container {
     width: 100%;

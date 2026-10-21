@@ -1,6 +1,7 @@
 import { auth } from './firebase.js';
 import { updateTodoText } from './todoService.js';
 import { todos, setTodos, dirtyIds, rerender } from './store.js';
+import { t } from './i18n.js';
 import { updateSaveStatus, showToast } from './feedback.js';
 
 const saveTimers = new Map();
@@ -29,7 +30,7 @@ export async function saveTodoText(id) {
     updateSaveStatus('saving');
     const ok = await writeTodoText(uid, id);
     updateSaveStatus(ok ? 'idle' : 'error');
-    if (!ok) showToast('Failed to save changes', 'error');
+    if (!ok) showToast(t('err_save'), 'error');
 }
 
 // 2s debounce after typing. The id is re-read from the input when the timer
@@ -60,7 +61,7 @@ export async function flushDirty() {
     const results = await Promise.all(ids.map(id => writeTodoText(uid, id)));
     const ok = results.every(Boolean);
     updateSaveStatus(ok ? 'idle' : 'error');
-    if (!ok) showToast('Sync failed', 'error');
+    if (!ok) showToast(t('err_sync'), 'error');
 }
 
 // Enter-created rows exist locally under a temp id first, so focus can land
@@ -68,7 +69,7 @@ export async function flushDirty() {
 // the real one in state and DOM — deliberately without a full re-render, which
 // would close the mobile keyboard. Returns the new doc, or null after rolling
 // the temp row back on a failed write.
-export async function commitTempTodo(tempId, createPromise, errorMessage = 'Failed to create todo') {
+export async function commitTempTodo(tempId, createPromise, errorMessage = t('err_create_todo')) {
     try {
         updateSaveStatus('saving');
         const newDoc = await createPromise;

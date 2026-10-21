@@ -1,9 +1,10 @@
-const CACHE_NAME = 'todo-v105';
+const CACHE_NAME = 'todo-v106';
 
 const PRECACHE = [
     './',
     './index.html',
     './styles.css',
+    './fonts/im-fell-english-latin.woff2',
     './src/app.js',
     './src/firebase.js',
     './src/auth.js',
