@@ -2,7 +2,7 @@ import { db } from './firebase.js';
 import {
     collection, addDoc, onSnapshot, query, orderBy,
     updateDoc, doc, deleteDoc, where, getDocs, writeBatch,
-    setDoc, increment
+    setDoc, increment, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 export function getTodayEpoch() {
@@ -14,29 +14,44 @@ function todosRef(uid) {
     return collection(db, 'users', uid, 'todos');
 }
 
-// Runs once on load: moves all unchecked past todos to today and increments moveCount.
-// Uses a batch update (never creates new documents) to prevent duplication.
-export async function moveTodos(uid) {
+// Moves all unchecked past todos to today and increments moveCount.
+// Load, tab-visible and day rollover can all ask for this at once — they share
+// one run, otherwise each reads the same stale dates and moveCount goes up twice.
+let moveInFlight = null;
+
+export function moveTodos(uid) {
+    if (!moveInFlight) moveInFlight = runMoveTodos(uid).finally(() => { moveInFlight = null; });
+    return moveInFlight;
+}
+
+const isPastTodo = (data, today) =>
+    !data.isDone && (!data.page || data.page === 'todo') && data.dateEpochDay < today;
+
+async function runMoveTodos(uid) {
     const today = getTodayEpoch();
     const q = query(todosRef(uid), where('isDone', '==', false));
     const snapshot = await getDocs(q);
-    const toMove = snapshot.docs.filter(d => {
-        const data = d.data();
-        const isTodoPage = !data.page || data.page === 'todo';
-        return isTodoPage && data.dateEpochDay < today;
-    });
-    if (toMove.length === 0) return;
+    const refs = snapshot.docs.filter(d => isPastTodo(d.data(), today)).map(d => d.ref);
+    if (refs.length === 0) return;
 
-    const batch = writeBatch(db);
-    toMove.forEach(docSnap => {
-        batch.update(docSnap.ref, {
-            dateEpochDay: today,
-            // increment() instead of read+1: two devices doing the morning move
-            // concurrently would otherwise both write the same stale count
-            moveCount: increment(1)
+    try {
+        // Re-read each todo inside a transaction: another device may have moved it
+        // already, or it was just dragged to another day — then it stays untouched
+        await runTransaction(db, async tx => {
+            const fresh = await Promise.all(refs.map(ref => tx.get(ref)));
+            fresh.forEach(snap => {
+                if (!snap.exists() || !isPastTodo(snap.data(), today)) return;
+                tx.update(snap.ref, { dateEpochDay: today, moveCount: (snap.data().moveCount || 0) + 1 });
+            });
         });
-    });
-    await batch.commit();
+    } catch (e) {
+        if (e?.code !== 'unavailable') throw e;
+        // Transactions need the server; offline the batch still moves the todos
+        // through the local cache (increment() so a concurrent write isn't lost)
+        const batch = writeBatch(db);
+        refs.forEach(ref => batch.update(ref, { dateEpochDay: today, moveCount: increment(1) }));
+        await batch.commit();
+    }
 }
 
 export function subscribeTodos(uid, callback) {
