@@ -9,7 +9,8 @@ service cloud.firestore {
     function isValidTodo(d) {
       return d.keys().hasOnly([
           'text', 'isDone', 'dateEpochDay', 'sortOrder', 'moveCount',
-          'page', 'parentId', 'isToggle', 'collapsed', 'createdAt', 'completedAt'
+          'page', 'parentId', 'isToggle', 'collapsed', 'createdAt', 'completedAt',
+          'recurrenceId'
         ])
         && d.text is string && d.text.size() <= 10000
         && d.isDone is bool
@@ -21,7 +22,22 @@ service cloud.firestore {
         && (!('isToggle' in d) || d.isToggle is bool)
         && (!('collapsed' in d) || d.collapsed is bool)
         && (!('createdAt' in d) || d.createdAt is number)
-        && (!('completedAt' in d) || d.completedAt == null || d.completedAt is number);
+        && (!('completedAt' in d) || d.completedAt == null || d.completedAt is number)
+        && (!('recurrenceId' in d) || (d.recurrenceId is string && d.recurrenceId.size() <= 100));
+    }
+
+    // Recurring todo rule: what and how often (see src/recurrence.js)
+    function isValidRecurrence(d) {
+      return d.keys().hasOnly([
+          'text', 'kind', 'interval', 'weekdays', 'startEpochDay', 'lastGeneratedDay', 'createdAt'
+        ])
+        && d.text is string && d.text.size() > 0 && d.text.size() <= 1000
+        && d.kind in ['daily', 'interval', 'weekdays']
+        && d.interval is int && d.interval >= 1 && d.interval <= 365
+        && d.weekdays is list && d.weekdays.size() <= 7
+        && d.startEpochDay is number
+        && d.lastGeneratedDay is number
+        && d.createdAt is number;
     }
 
     // Productivity docs are keyed YYYY-MM-DD and hold counters bucketed by
@@ -40,6 +56,12 @@ service cloud.firestore {
       allow read, delete: if request.auth != null && request.auth.uid == uid;
       allow create, update: if request.auth != null && request.auth.uid == uid
         && isValidTodo(request.resource.data);
+    }
+
+    match /users/{uid}/recurrences/{ruleId} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && isValidRecurrence(request.resource.data);
     }
 
     match /users/{uid}/productivity/{dayId} {

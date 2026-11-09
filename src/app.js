@@ -23,6 +23,7 @@ import { todos, dirtyIds } from './store.js';
 import { applyTheme, applyAccent, applyBgBrightness, applyPattern, applyBannerPhoto, initBannerDrag, initSettings } from './settings.js';
 import { initHistory, clearHistory } from './history.js';
 import { initSelection, clearSelection } from './selection.js';
+import { initRecurrence, subscribeRecurrences, stopRecurrences, generateRecurring } from './recurrence.js';
 
 let unsubscribe = null;
 let currentUid = null;
@@ -54,6 +55,17 @@ function dismissSplash() {
 // pagehide is more reliable than beforeunload for async-safe save-on-exit
 window.addEventListener('pagehide', () => flushDirty());
 
+// Recurring todos are generated after the move: an open one from yesterday has
+// to be on today already, or a second one would be added next to it
+function runDailyTasks(uid) {
+    const daily = moveTodos(uid)
+        .catch(e => console.error('moveTodos:', e))
+        .then(() => generateRecurring(uid))
+        .catch(e => console.error('generateRecurring:', e));
+    cleanupNotes(uid).catch(e => console.error('cleanupNotes:', e));
+    return daily;
+}
+
 // --- Day rollover ---
 // A tab that just stays open and visible never gets a visibilitychange, so the
 // date is checked on a timer too. setInterval is the backstop for sleep/wake
@@ -66,8 +78,7 @@ function checkDay() {
     if (today === renderedDay) return;
     renderedDay = today;
     if (!currentUid) return;
-    moveTodos(currentUid).catch(e => console.error('moveTodos:', e));
-    cleanupNotes(currentUid).catch(e => console.error('cleanupNotes:', e));
+    runDailyTasks(currentUid);
     // Render directly: when nothing needs moving no snapshot arrives, and the
     // calendar would keep showing yesterday as today
     renderApp(todos);
@@ -136,8 +147,7 @@ document.addEventListener('visibilitychange', () => {
     checkDay();
     checkForUpdate();
     if (!currentUid) return;
-    moveTodos(currentUid).catch(e => console.error('moveTodos:', e));
-    cleanupNotes(currentUid).catch(e => console.error('cleanupNotes:', e));
+    runDailyTasks(currentUid);
 });
 
 // Wired once at module level — showApp() runs again on every sign-in
@@ -175,9 +185,10 @@ initAuth(
         initCharts();
         initHistory();
         initSelection();
+        initRecurrence();
 
-        try { await moveTodos(user.uid); } catch (e) { console.error('moveTodos:', e); }
-        try { await cleanupNotes(user.uid); } catch (e) { console.error('cleanupNotes:', e); }
+        await runDailyTasks(user.uid);
+        subscribeRecurrences(user.uid);
 
         if (unsubscribe) unsubscribe();
         unsubscribe = subscribeTodos(user.uid, (todos) => {
@@ -192,6 +203,7 @@ initAuth(
         currentUid = null;
         clearSelection();
         clearHistory();
+        stopRecurrences();
         if (unsubscribe) { unsubscribe(); unsubscribe = null; }
         if (saveInterval) { clearInterval(saveInterval); saveInterval = null; }
         showAuth();

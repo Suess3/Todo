@@ -14,6 +14,7 @@ import { scheduleSave, attachBlurSave, commitTempTodo } from './save.js';
 import { createNoteRow, updateNoteRow, placeCaretAtStart, placeCaretAtEnd, placeCaretAtTextOffset } from './notes.js';
 import { recordChange, recordToggle } from './history.js';
 import { applySelectionClasses, clearSelection } from './selection.js';
+import { previewRulesFor } from './recurrence.js';
 import './dragdrop.js';
 
 const expandedStates = {};
@@ -391,6 +392,12 @@ function createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensi
     );
 
     row.appendChild(input);
+    if (todo.recurrenceId) {
+        const mark = document.createElement('span');
+        mark.className = 'recur-mark';
+        mark.textContent = '↻';
+        row.appendChild(mark);
+    }
     return row;
 }
 
@@ -639,7 +646,10 @@ function buildDaySection(dateEpoch, today, dayTodos, uid) {
     const urgencyIntensity = getUrgencyIntensity();
     dayTodos.forEach(todo => list.appendChild(createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensity)));
 
-    if (isOpen) list.appendChild(buildAddBtn(dayTodos.length === 0, t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast(t('err_create_todo'), 'error'); console.error(e); })));
+    const previews = buildPreviewBox(list);
+    syncPreviews(previews, previewRulesFor(dateEpoch, dayTodos));
+
+    if (isOpen) list.appendChild(buildAddBtn(isDayEmpty(dayTodos, previews), t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast(t('err_create_todo'), 'error'); console.error(e); })));
 
     section.appendChild(list);
     return section;
@@ -668,16 +678,20 @@ function reconcileDaySection(section, dateEpoch, today, dayTodos, uid) {
     const existingById = new Map();
     list.querySelectorAll('.todo-row[data-id]').forEach(row => existingById.set(row.dataset.id, row));
 
+    const previews = list.querySelector('.recur-previews') || buildPreviewBox(list);
+    syncPreviews(previews, previewRulesFor(dateEpoch, dayTodos));
+
     let addBtn = list.querySelector('.tap-to-add');
     if (!isOpen && addBtn) { addBtn.remove(); addBtn = null; }
     if (isOpen && !addBtn) {
-        addBtn = buildAddBtn(dayTodos.length === 0, t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast(t('err_create_todo'), 'error'); console.error(e); }));
+        addBtn = buildAddBtn(isDayEmpty(dayTodos, previews), t('no_tasks'), () => addTodo(uid, dateEpoch).catch(e => { showToast(t('err_create_todo'), 'error'); console.error(e); }));
         list.appendChild(addBtn);
     }
-    if (addBtn) setAddBtnText(addBtn, dayTodos.length === 0, t('no_tasks'));
+    if (addBtn) setAddBtnText(addBtn, isDayEmpty(dayTodos, previews), t('no_tasks'));
 
+    // Rows go in above the previews, which stay right before the "+"
     reconcileRows(
-        list, dayTodos, addBtn,
+        list, dayTodos, previews,
         existingById,
         todo => createCalendarRow(todo, dateEpoch, isToday, isPast, uid, urgencyIntensity),
         (row, todo) => updateCalendarRow(row, todo, isToday, isPast, urgencyIntensity)
@@ -700,6 +714,40 @@ function buildDayHeader(dateEpoch, today) {
     });
     return header;
 }
+
+// --- Recurring previews (coming days) ---
+
+// Faded, inert rows for rules due on a future day. Not .todo-row: drag & drop and
+// selection only ever look at real rows.
+function buildPreviewBox(list) {
+    const box = document.createElement('div');
+    box.className = 'recur-previews';
+    list.appendChild(box);
+    return box;
+}
+
+function syncPreviews(box, rules) {
+    const key = rules.map(r => r.id + '\u0000' + r.text).join('\u0001');
+    if (box.dataset.key === key) return;
+    box.dataset.key = key;
+    box.replaceChildren(...rules.map(rule => {
+        const row = document.createElement('div');
+        row.className = 'recur-preview';
+        const handle = document.createElement('div');
+        handle.className = 'drag-handle';
+        handle.textContent = '⋮⋮';
+        const mark = document.createElement('div');
+        mark.className = 'recur-preview-mark';
+        mark.textContent = '↻';
+        const text = document.createElement('span');
+        text.className = 'recur-preview-text';
+        text.textContent = rule.text;
+        row.append(handle, mark, text);
+        return row;
+    }));
+}
+
+const isDayEmpty = (dayTodos, previews) => dayTodos.length === 0 && previews.childElementCount === 0;
 
 // Empty list: the hint text. Otherwise a small "+" under the checkbox column
 function setAddBtnText(btn, isEmpty, emptyText) {

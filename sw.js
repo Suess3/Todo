@@ -22,6 +22,7 @@ const PRECACHE = [
     './src/charts.js',
     './src/animations.js',
     './src/version.js',
+    './src/recurrence.js',
     'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
     'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js',
     'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js',

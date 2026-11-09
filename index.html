@@ -115,10 +115,39 @@
             </div>
         </div>
 
+        <div id="recur-modal" class="modal-overlay hidden">
+            <div class="modal-card recur-card">
+                <div class="modal-header">
+                    <span data-i18n="recurring">Recurring</span>
+                    <button id="recur-close" class="modal-close">✕</button>
+                </div>
+                <div id="recur-list" class="recur-list"></div>
+                <div class="recur-form">
+                    <input type="text" id="recur-text" class="auth-input" maxlength="1000" autocomplete="off">
+                    <div class="pattern-picker" id="recur-kind">
+                        <button class="pattern-btn" data-kind="daily" data-i18n="recur_daily">daily</button>
+                        <button class="pattern-btn" data-kind="interval" data-i18n="recur_interval">every N days</button>
+                        <button class="pattern-btn" data-kind="weekdays" data-i18n="recur_weekdays">weekdays</button>
+                    </div>
+                    <div id="recur-interval-row" class="recur-sub hidden">
+                        <span data-i18n="recur_every">every</span>
+                        <input type="number" id="recur-interval" class="recur-interval" min="2" max="365" value="2" inputmode="numeric">
+                        <span data-i18n="recur_days">days</span>
+                    </div>
+                    <div id="recur-weekday-row" class="pattern-picker recur-sub hidden"></div>
+                    <div class="recur-actions">
+                        <button id="recur-cancel" class="modal-action-btn muted hidden" data-i18n="recur_cancel">Cancel</button>
+                        <button id="recur-submit" class="modal-action-btn">Add</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div id="app-banner">
             <div class="app-header">
                 <span id="save-status" class="save-status hidden"></span>
                 <button id="undo-btn" class="settings-btn" title="Undo" disabled>↩</button>
+                <button id="recur-btn" class="settings-btn" title="Recurring">↻</button>
                 <button id="charts-btn" class="settings-btn" title="Productivity">◑</button>
                 <button id="settings-btn" class="settings-btn">⚙︎</button>
             </div>

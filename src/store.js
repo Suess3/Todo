@@ -28,3 +28,8 @@ export function setRenderer(fn) { rerender = fn; }
 // Ids of rows marked by a cross-row drag (selection.js). Kept here so the
 // renderer can re-apply the highlight after every reconcile.
 export const selectedIds = new Set();
+
+// Recurrence rules (recurrence.js), live from Firestore — the calendar reads
+// them for the faded previews on coming days
+export let recurrences = [];
+export function setRecurrences(next) { recurrences = next; }

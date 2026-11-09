@@ -949,3 +949,117 @@ body.selecting-rows .todo-input {
     cursor: default;
 }
 .settings-btn:disabled:hover { color: var(--text-faint); }
+
+/* --- RECURRING TODOS --- */
+/* Instances carry a small ↻ after the text. System font: IM Fell's ↻ is tiny
+   and reads like a "v" */
+.recur-mark, .recur-preview-mark {
+    font-family: -apple-system, system-ui, sans-serif;
+}
+.recur-mark {
+    flex-shrink: 0;
+    margin: 0 6px;
+    color: var(--text-faint);
+    font-size: 15px;
+    user-select: none;
+}
+
+/* Faded, inert preview rows on coming days — same columns as a real row */
+.recur-preview {
+    display: flex;
+    align-items: center;
+    padding: 4px;
+    opacity: 0.4;
+    pointer-events: none;
+    user-select: none;
+}
+.recur-preview-mark {
+    width: 22px;
+    padding: 4px;
+    flex-shrink: 0;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 16px;
+}
+.recur-preview-text {
+    margin-left: 12px;
+    font-family: 'IM Fell English', serif;
+    font-size: 18px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.recur-card {
+    max-height: 90vh;
+    overflow-y: auto;
+}
+.recur-list { margin-bottom: 16px; }
+.recur-empty {
+    color: var(--text-muted);
+    font-size: 15px;
+    padding: 8px 0;
+}
+.recur-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text);
+    cursor: pointer;
+}
+.recur-row.editing .recur-row-text { color: var(--accent); }
+.recur-row-text {
+    flex: 1;
+    min-width: 0;
+    font-size: 17px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.recur-row-rhythm {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+.recur-del {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-family: 'IM Fell English', serif;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 4px;
+}
+.recur-del:hover, .recur-del.armed { color: #e05555; }
+
+.recur-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.recur-sub {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+    font-size: 15px;
+}
+.recur-interval {
+    width: 56px;
+    background: var(--input-bg);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: 'IM Fell English', serif;
+    font-size: 15px;
+    padding: 4px 6px;
+}
+.recur-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}

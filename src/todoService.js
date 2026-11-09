@@ -93,6 +93,7 @@ export async function restoreTodo(uid, data) {
         collapsed: !!data.collapsed,
         createdAt: data.createdAt ?? Date.now(),
         completedAt: data.completedAt ?? null,
+        ...(data.recurrenceId ? { recurrenceId: data.recurrenceId } : {}),
     });
 }
 

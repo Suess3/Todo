@@ -160,7 +160,7 @@ function initDragAndDrop() {
             indicator = document.createElement('div');
             indicator.className = 'drop-indicator';
         }
-        const anchor = dayTarget.beforeRow || list.querySelector('.tap-to-add');
+        const anchor = dayTarget.beforeRow || list.querySelector('.recur-previews, .tap-to-add');
         if (indicator.parentNode !== list || indicator.nextSibling !== anchor) list.insertBefore(indicator, anchor);
     }
 
